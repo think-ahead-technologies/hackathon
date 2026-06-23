@@ -1,0 +1,15 @@
+{
+  "_comment": "Deployability gate policy. Column names map to the Vela summary CSV (confirm against the actual ethos-u-vela version; the doc warns they vary). Thresholds are the edge contract a model must satisfy before it can reach a device.",
+  "columns": {
+    "sram_kib": "total_sram_used",
+    "cpu_ops": "cpu_operators",
+    "npu_ops": "npu_operators",
+    "inference_ms": "batch_inference_time"
+  },
+  "thresholds": {
+    "max_sram_kib": 3500,
+    "max_inference_ms": 50,
+    "max_cpu_fallback_ratio": 0.10,
+    "max_flatbuffer_kib": 1024
+  }
+}

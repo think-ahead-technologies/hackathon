@@ -1,0 +1,124 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "refresh": "2s",
+  "schemaVersion": 39,
+  "tags": ["edge", "model-loop"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "",
+  "title": "Edge Ops · model loop",
+  "uid": "edge-models",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Labels captured (retrain data)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS value FROM labels WHERE label <> 'dismiss'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#534AB7" } },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value", "graphMode": "none", "textMode": "value", "justifyMode": "center"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Retrains queued",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS value FROM model_events WHERE event_type='retrain_queued'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#534AB7" } },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value", "graphMode": "none", "textMode": "value", "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Current model version",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT COALESCE((SELECT model_version FROM model_events WHERE event_type='deployed' ORDER BY ts DESC LIMIT 1), 'baseline') AS value"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "#534AB7" } },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none", "graphMode": "none", "textMode": "value", "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Model & control events",
+      "type": "table",
+      "gridPos": { "h": 13, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT ts, event_type, model_version, detail FROM model_events ORDER BY ts DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "event_type" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "retrain_queued": { "color": "#534AB7", "index": 0 } } },
+                  { "type": "value", "options": { "deployed": { "color": "#534AB7", "index": 1 } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "ts", "desc": true }] }
+    }
+  ]
+}

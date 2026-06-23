@@ -1,0 +1,6 @@
+{
+  "_comment": "GitOps desired state: the model version each line should be running. Bump a value and run `make promote` to reconcile (verify signature -> publish Contract C).",
+  "lines": {
+    "line1": "pdm-anomaly@2026.06.15-a3f1"
+  }
+}

@@ -1,0 +1,80 @@
+# ABOUTME: Unit tests for the data-minimization policy — run with `vector test`.
+# ABOUTME: Guards the compliance invariant: raw/features blocked, only inference egresses.
+
+tests:
+  - name: "raw is classified blocked and dropped at the boundary"
+    inputs:
+      - insert_at: policy
+        type: log
+        log_fields:
+          data_classification: raw
+          bytes: 4096
+          container_id: cnc-7
+    outputs:
+      - extract_from: policy
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.disposition, "blocked")
+    no_outputs_from: [forwarded, contract_b]
+
+  - name: "features is classified blocked and dropped at the boundary"
+    inputs:
+      - insert_at: policy
+        type: log
+        log_fields:
+          data_classification: features
+          bytes: 512
+          container_id: cnc-7
+    outputs:
+      - extract_from: policy
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.disposition, "blocked")
+    no_outputs_from: [forwarded, contract_b]
+
+  - name: "inference is egressed, forwarded, and cleaned to Contract B"
+    inputs:
+      - insert_at: policy
+        type: log
+        log_fields:
+          data_classification: inference
+          bytes: 50
+          container_id: cnc-7
+          model_version: "pdm-anomaly@v1"
+          anomaly_score: 0.82
+          traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+    outputs:
+      - extract_from: policy
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.disposition, "egressed")
+      - extract_from: contract_b
+        conditions:
+          - type: vrl
+            source: |
+              # gateway-internal fields must not leak onto the fabric
+              assert!(!exists(.data_classification), "data_classification leaked")
+              assert!(!exists(.bytes), "bytes leaked")
+              assert!(!exists(.disposition), "disposition leaked")
+              # Contract B + trace context must survive the strip
+              assert!(exists(.anomaly_score), "anomaly_score dropped")
+              assert_eq!(.container_id, "cnc-7")
+              assert_eq!(.traceparent, "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+
+  - name: "unknown classification is blocked (fail closed)"
+    inputs:
+      - insert_at: policy
+        type: log
+        log_fields:
+          data_classification: experimental
+          bytes: 1024
+    outputs:
+      - extract_from: policy
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.disposition, "blocked")
+    no_outputs_from: [forwarded, contract_b]

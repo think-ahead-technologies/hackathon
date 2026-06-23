@@ -1,0 +1,123 @@
+<mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="760" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <mxCell id="title" value="Edge ML platform — deployment topology (where each part runs)" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+      <mxGeometry x="40" y="20" width="900" height="30" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== ZONE BOXES ===================== -->
+    <mxCell id="z1" value="DEVICE / EDGE BOARD&#10;Infineon KIT_PSE84_AI + Ethos-U55 NPU" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbeee7;strokeColor=#D85A30;verticalAlign=top;fontStyle=1;fontSize=12;fontColor=#9c3f1f;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="40" y="70" width="320" height="600" as="geometry"/>
+    </mxCell>
+    <mxCell id="z2" value="EDGE NODE / ON-PREM (one laptop in the demo)&#10;local-first docker-compose · no hyperscaler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef7f3;strokeColor=#1D9E75;verticalAlign=top;fontStyle=1;fontSize=12;fontColor=#176e52;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="430" y="70" width="540" height="600" as="geometry"/>
+    </mxCell>
+    <mxCell id="z3" value="SOVEREIGN CLOUD (optional · production)&#10;model pipeline + GitOps · runs unchanged on sovereign infra" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eeedf8;strokeColor=#534AB7;verticalAlign=top;fontStyle=1;fontSize=12;fontColor=#3a3290;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="1040" y="70" width="320" height="600" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== DEVICE ZONE ===================== -->
+    <mxCell id="d1" value="Sensors (acoustic / IMU)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+      <mxGeometry x="70" y="130" width="260" height="44" as="geometry"/>
+    </mxCell>
+    <mxCell id="d2" value="Feature extraction (FFT / RMS / kurtosis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+      <mxGeometry x="70" y="186" width="260" height="44" as="geometry"/>
+    </mxCell>
+    <mxCell id="d3" value="TFLM + Ethos-U55 inference&#10;flash-resident model (Contract A)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+      <mxGeometry x="70" y="242" width="260" height="56" as="geometry"/>
+    </mxCell>
+    <mxCell id="d4" value="Inference publish (Contract B only)&#10;firmware emits inference verdicts · raw + features never published" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f7ddd2;strokeColor=#D85A30;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="70" y="320" width="260" height="62" as="geometry"/>
+    </mxCell>
+    <mxCell id="d5" value="raw + features never leave the device&#10;(stay in on-device ring buffer)" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#9c3f1f;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="70" y="392" width="260" height="34" as="geometry"/>
+    </mxCell>
+    <mxCell id="d6" value="(in the demo the device is simulated by fakegen, and the gateway runs in the edge node)" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#777777;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="60" y="600" width="280" height="56" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== TRUST BOUNDARY ===================== -->
+    <mxCell id="tb" value="" style="endArrow=none;dashed=1;dashPattern=6 6;strokeColor=#D85A30;strokeWidth=2;html=1;" edge="1" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="395" y="100" as="sourcePoint"/>
+        <mxPoint x="395" y="660" as="targetPoint"/>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="tbl" value="TRUST BOUNDARY" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#D85A30;rotation=-90;" vertex="1" parent="1">
+      <mxGeometry x="345" y="360" width="100" height="20" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== EDGE NODE ZONE ===================== -->
+    <mxCell id="e1" value="NATS (JetStream) — message fabric" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6efe6;strokeColor=#1D9E75;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="450" y="120" width="500" height="42" as="geometry"/>
+    </mxCell>
+    <mxCell id="e2" value="bridge&#10;ingest · /label /deploy /control" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+      <mxGeometry x="450" y="186" width="240" height="56" as="geometry"/>
+    </mxCell>
+    <mxCell id="e3" value="TimescaleDB&#10;system of record (scores · alerts · labels · model_events)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+      <mxGeometry x="710" y="186" width="240" height="56" as="geometry"/>
+    </mxCell>
+    <mxCell id="e4" value="OTel Collector&#10;spanmetrics + service_graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6efe6;strokeColor=#1D9E75;" vertex="1" parent="1">
+      <mxGeometry x="450" y="258" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e5" value="Tempo&#10;trace storage (waterfalls)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6efe6;strokeColor=#1D9E75;" vertex="1" parent="1">
+      <mxGeometry x="710" y="258" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e6" value="Prometheus&#10;operational metrics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6efe6;strokeColor=#1D9E75;" vertex="1" parent="1">
+      <mxGeometry x="450" y="324" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e7" value="Grafana&#10;ops · traces · model-loop dashboards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;" vertex="1" parent="1">
+      <mxGeometry x="710" y="324" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e8" value="label-ui&#10;operator surface (Contract D)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dddaf2;strokeColor=#534AB7;fontStyle=1;" vertex="1" parent="1">
+      <mxGeometry x="450" y="390" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e9" value="Vector gateway&#10;enforces + audits egress policy (demo &amp; prod)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f7ddd2;strokeColor=#D85A30;dashed=1;" vertex="1" parent="1">
+      <mxGeometry x="710" y="390" width="240" height="50" as="geometry"/>
+    </mxCell>
+    <mxCell id="e10" value="data plane (Vector)&#10;telemetry plane (Collector → Prometheus / Tempo)&#10;records (Timescale)" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#176e52;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="450" y="470" width="500" height="50" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== CLOUD ZONE ===================== -->
+    <mxCell id="c1" value="CI: Vela compile + gate + cosign sign&#10;(model = a signed build artifact)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dddaf2;strokeColor=#534AB7;" vertex="1" parent="1">
+      <mxGeometry x="1065" y="130" width="270" height="58" as="geometry"/>
+    </mxCell>
+    <mxCell id="c2" value="OCI registry&#10;signed model artifacts + manifest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dddaf2;strokeColor=#534AB7;" vertex="1" parent="1">
+      <mxGeometry x="1065" y="206" width="270" height="52" as="geometry"/>
+    </mxCell>
+    <mxCell id="c3" value="GitOps reconciler (Flux / Argo)&#10;rollout = a version bump in Git" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dddaf2;strokeColor=#534AB7;" vertex="1" parent="1">
+      <mxGeometry x="1065" y="276" width="270" height="52" as="geometry"/>
+    </mxCell>
+    <mxCell id="c4" value="ML retraining&#10;consumes labels, produces a new model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dddaf2;strokeColor=#534AB7;" vertex="1" parent="1">
+      <mxGeometry x="1065" y="346" width="270" height="58" as="geometry"/>
+    </mxCell>
+    <mxCell id="c5" value="(out of scope in the demo;&#10;the deploy beat is shown via bridge /deploy)" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#777777;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="1055" y="430" width="290" height="40" as="geometry"/>
+    </mxCell>
+
+    <!-- ===================== CONTRACTS (the seams) ===================== -->
+    <mxCell id="cb" value="Contract B — telemetry&#10;inference only (~50 B)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1D9E75;strokeWidth=2;fontColor=#176e52;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d4" target="e1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="cd" value="Contract D — labels (retrain data)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#534AB7;strokeWidth=2;fontColor=#3a3290;fontStyle=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="e3" target="c4">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="cc" value="Contract C — signed model deploy (models.&lt;line&gt;.deploy)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#534AB7;strokeWidth=2;fontColor=#3a3290;fontStyle=1;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c3" target="d3">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1200" y="40"/>
+          <mxPoint x="200" y="40"/>
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ===================== LEGEND / LOOP NOTE ===================== -->
+    <mxCell id="lg" value="The demo spine (the loop): B telemetry  →  D labels / retrain  →  C signed redeploy  →  back to the device.&#10;Minimization happens twice: by construction on-device (firmware emits only inference); by policy at the gateway (Vector enforces + audits; raw + features dropped). Data minimization / CRA.&#10;Demo: device simulated by fakegen; Vector + the whole edge-node stack run on one laptop. Production: cloud zone on sovereign infra (k3s / KubeEdge); Vector stays at the gateway." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;align=left;verticalAlign=middle;fontSize=11;spacingLeft=10;" vertex="1" parent="1">
+      <mxGeometry x="40" y="688" width="1320" height="62" as="geometry"/>
+    </mxCell>
+
+  </root>
+</mxGraphModel>

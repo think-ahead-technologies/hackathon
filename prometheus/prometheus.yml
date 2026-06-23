@@ -1,0 +1,20 @@
+# ABOUTME: Prometheus scrape config for the edge observability stack.
+# ABOUTME: Scrapes the OTel Collector (spanmetrics + egress) and the bridge's /metrics.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Trace-derived metrics: spanmetrics (p95 by hop) + service_graph (edge map).
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Data-minimization enforcement: boundary_bytes (blocked vs egressed).
+  - job_name: vector
+    static_configs:
+      - targets: ["vector:9598"]
+
+  # Note: the bridge is NOT scraped. Its scores/alerts are the system of record in
+  # Timescale (queried via SQL); Prometheus holds only metrics that aren't records.

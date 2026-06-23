@@ -1,0 +1,69 @@
+# ABOUTME: Vector edge data-minimization gateway — the trust boundary, as reviewable code.
+# ABOUTME: Drops raw/features at the edge; forwards only inference (Contract B) to the fabric.
+
+sources:
+  # The device's full internal data plane (raw windows, features, inference results).
+  edge:
+    type: nats
+    url: nats://nats:4222
+    subject: "edge.>"
+    connection_name: vector-edge-gateway
+    subject_key_field: subject
+    decoding:
+      codec: json
+  vector_metrics:
+    type: internal_metrics
+
+transforms:
+  # The policy: classify each event and decide whether it may cross the boundary.
+  policy:
+    type: remap
+    inputs: [edge]
+    source: |
+      if !exists(.data_classification) { .data_classification = "unknown" }
+      .bytes = to_int(.bytes) ?? 0
+      .disposition = if .data_classification == "inference" { "egressed" } else { "blocked" }
+
+  # Audit metric: bytes seen at the boundary, by class and disposition.
+  meter:
+    type: log_to_metric
+    inputs: [policy]
+    metrics:
+      - type: counter
+        field: bytes
+        name: boundary_bytes
+        increment_by_value: true
+        tags:
+          data_classification: "{{data_classification}}"
+          disposition: "{{disposition}}"
+
+  # Enforcement: only egress-classified (inference) events are forwarded onward.
+  forwarded:
+    type: filter
+    inputs: [policy]
+    condition: '.disposition == "egressed"'
+
+  # Hand the fabric a clean Contract B message (strip gateway-internal fields).
+  contract_b:
+    type: remap
+    inputs: [forwarded]
+    source: |
+      del(.data_classification)
+      del(.bytes)
+      del(.disposition)
+      del(.subject)
+
+sinks:
+  # Forward only inference to the fabric; the bridge consumes inference.> as before.
+  fabric:
+    type: nats
+    inputs: [contract_b]
+    url: nats://nats:4222
+    subject: "inference.line1.gateway"
+    encoding:
+      codec: json
+  # Expose the enforcement metrics for Prometheus.
+  prometheus:
+    type: prometheus_exporter
+    inputs: [meter, vector_metrics]
+    address: 0.0.0.0:9598

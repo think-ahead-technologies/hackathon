@@ -1,0 +1,84 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["edge", "traces"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "",
+  "title": "Edge Ops · traces",
+  "uid": "edge-traces",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Service map (edge → cloud)",
+      "type": "nodeGraph",
+      "gridPos": { "h": 11, "w": 10, "x": 0, "y": 0 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "serviceMap"
+        }
+      ],
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Recent traces · click a row for the sensor→inference→fabric→cloud waterfall",
+      "type": "table",
+      "gridPos": { "h": 11, "w": 14, "x": 10, "y": 0 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceqlSearch",
+          "query": "{}",
+          "tableType": "traces",
+          "limit": 20
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 3,
+      "title": "p95 edge latency · service graph",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (client, server, le) (rate(traces_service_graph_request_client_seconds_bucket{server!=\"unknown\"}[5m])))",
+          "legendFormat": "{{client}} → {{server}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": { "mode": "fixed", "fixedColor": "#534AB7" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] }
+      }
+    }
+  ]
+}

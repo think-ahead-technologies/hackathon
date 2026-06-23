@@ -1,0 +1,14 @@
+# ABOUTME: Tells Grafana to load dashboards from the committed JSON on disk.
+# ABOUTME: The 5-panel ops dashboard is provisioned as code, not clicked together.
+
+apiVersion: 1
+
+providers:
+  - name: ops
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

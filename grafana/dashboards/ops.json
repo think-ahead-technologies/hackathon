@@ -1,0 +1,338 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "Model events",
+        "datasource": { "type": "postgres", "uid": "timescale" },
+        "enable": true,
+        "iconColor": "#534AB7",
+        "target": {
+          "rawSql": "SELECT ts AS time, event_type || ': ' || COALESCE(model_version, detail, '') AS text, event_type AS tags FROM model_events WHERE $__timeFilter(ts) ORDER BY ts",
+          "format": "table"
+        }
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": true,
+  "refresh": "2s",
+  "schemaVersion": 39,
+  "tags": ["edge", "ops"],
+  "templating": {
+    "list": [
+      {
+        "name": "c",
+        "label": "Container",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "timescale" },
+        "definition": "SELECT DISTINCT container_id FROM scores ORDER BY 1",
+        "query": "SELECT DISTINCT container_id FROM scores ORDER BY 1",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Edge Ops · the loop",
+  "uid": "edge-ops",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Containers reporting",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT container_id) AS value FROM scores WHERE $__timeFilter(ts)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "#1D9E75" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active alerts",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) AS value FROM alerts WHERE state='unlabeled'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "#1D9E75" },
+              { "value": 1, "color": "#D85A30" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "title": "p95 anomaly score",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY anomaly_score) AS value FROM scores WHERE $__timeFilter(ts)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "#1D9E75" },
+              { "value": 0.6, "color": "#D85A30" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Inference egress",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT count(*) * 50.0 / GREATEST(EXTRACT(epoch FROM (max(ts) - min(ts))), 1) AS value FROM scores WHERE $__timeFilter(ts)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "#1D9E75" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Live anomaly score · threshold 0.60",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "time_series",
+          "rawSql": "SELECT ts AS time, anomaly_score AS \"$c\" FROM scores WHERE container_id = '$c' AND $__timeFilter(ts) ORDER BY ts"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "scheme",
+            "showPoints": "never",
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "#1D9E75" },
+              { "value": 0.6, "color": "#D85A30" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Alert feed",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "timescale" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "timescale" },
+          "rawQuery": true,
+          "format": "table",
+          "rawSql": "SELECT ts, container_id, anomaly_score, state, label FROM alerts ORDER BY ts DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "state" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "unlabeled": { "color": "#D85A30", "index": 0 } } },
+                  { "type": "value", "options": { "labeled": { "color": "#534AB7", "index": 1 } } },
+                  { "type": "value", "options": { "dismissed": { "color": "#8b909c", "index": 2 } } }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "anomaly_score" },
+            "properties": [{ "id": "decimals", "value": 2 }]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "ts", "desc": true }] }
+    },
+    {
+      "id": 7,
+      "title": "Data minimization at the trust boundary · blocked vs egressed",
+      "type": "bargauge",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (data_classification, disposition) (rate(boundary_bytes[1m]))",
+          "legendFormat": "{{data_classification}} · {{disposition}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "#1D9E75" },
+          "thresholds": { "mode": "absolute", "steps": [{ "value": null, "color": "#1D9E75" }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*blocked.*" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#D85A30" } }]
+          }
+        ]
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 8,
+      "title": "p95 latency by hop",
+      "type": "bargauge",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (span_name, le) (rate(spanmetrics_duration_milliseconds_bucket{span_name!=\"edge.pipeline\"}[1m])))",
+          "legendFormat": "{{span_name}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "#534AB7" },
+          "thresholds": { "mode": "absolute", "steps": [{ "value": null, "color": "#534AB7" }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      }
+    }
+  ]
+}

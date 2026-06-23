@@ -1,0 +1,88 @@
+# ABOUTME: Secure variant of vector.yaml — identical policy, plus per-identity nkey auth on NATS.
+# ABOUTME: Mounted by docker-compose.secure.yml; keep the transform policy in sync with vector.yaml.
+# The open broker can't verify an nkey, so this auth-enabled config is separate from vector.yaml.
+# VECTOR_NATS_NKEY (public) + VECTOR_NATS_SEED (secret) come from nats/creds/vector.nk via `make up-secure`.
+
+sources:
+  # The device's full internal data plane (raw windows, features, inference results).
+  edge:
+    type: nats
+    url: nats://nats:4222
+    subject: "edge.>"
+    connection_name: vector-edge-gateway
+    subject_key_field: subject
+    auth:
+      strategy: nkey
+      nkey:
+        nkey: "${VECTOR_NATS_NKEY}"
+        seed: "${VECTOR_NATS_SEED}"
+    tls:
+      enabled: true
+      ca_file: /etc/nats/tls/ca.pem
+    decoding:
+      codec: json
+  vector_metrics:
+    type: internal_metrics
+
+transforms:
+  # The policy: classify each event and decide whether it may cross the boundary.
+  policy:
+    type: remap
+    inputs: [edge]
+    source: |
+      if !exists(.data_classification) { .data_classification = "unknown" }
+      .bytes = to_int(.bytes) ?? 0
+      .disposition = if .data_classification == "inference" { "egressed" } else { "blocked" }
+
+  # Audit metric: bytes seen at the boundary, by class and disposition.
+  meter:
+    type: log_to_metric
+    inputs: [policy]
+    metrics:
+      - type: counter
+        field: bytes
+        name: boundary_bytes
+        increment_by_value: true
+        tags:
+          data_classification: "{{data_classification}}"
+          disposition: "{{disposition}}"
+
+  # Enforcement: only egress-classified (inference) events are forwarded onward.
+  forwarded:
+    type: filter
+    inputs: [policy]
+    condition: '.disposition == "egressed"'
+
+  # Hand the fabric a clean Contract B message (strip gateway-internal fields).
+  contract_b:
+    type: remap
+    inputs: [forwarded]
+    source: |
+      del(.data_classification)
+      del(.bytes)
+      del(.disposition)
+      del(.subject)
+
+sinks:
+  # Forward only inference to the fabric; the bridge consumes inference.> as before.
+  fabric:
+    type: nats
+    inputs: [contract_b]
+    url: nats://nats:4222
+    subject: "inference.line1.gateway"
+    connection_name: vector-fabric-egress
+    auth:
+      strategy: nkey
+      nkey:
+        nkey: "${VECTOR_NATS_NKEY}"
+        seed: "${VECTOR_NATS_SEED}"
+    tls:
+      enabled: true
+      ca_file: /etc/nats/tls/ca.pem
+    encoding:
+      codec: json
+  # Expose the enforcement metrics for Prometheus.
+  prometheus:
+    type: prometheus_exporter
+    inputs: [meter, vector_metrics]
+    address: 0.0.0.0:9598

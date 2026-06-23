@@ -1,0 +1,215 @@
+<!doctype html>
+<!-- ABOUTME: Operator label surface — shows open alerts, posts Contract D labels via the bridge. -->
+<!-- ABOUTME: Static page (no build step); the bridge turns a click into a NATS labels.* publish. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Edge Ops · Operator Labels</title>
+  <style>
+    :root {
+      --coral: #D85A30;   /* over-threshold / active alert */
+      --teal:  #1D9E75;   /* healthy / telemetry */
+      --purple:#534AB7;   /* model / control events */
+      --ink:   #1b1d23;
+      --paper: #f5f6f8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--ink); color: var(--paper); min-height: 100vh;
+    }
+    header {
+      padding: 20px 28px; border-bottom: 1px solid #2c2f38;
+      display: flex; align-items: baseline; gap: 14px;
+    }
+    header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+    header .sub { color: #8b909c; font-size: 13px; }
+    main { padding: 24px 28px; max-width: 760px; margin: 0 auto; }
+    .empty { color: #8b909c; padding: 48px 0; text-align: center; font-size: 15px; }
+    .alert {
+      background: #23262f; border: 1px solid #34384400; border-left: 4px solid var(--coral);
+      border-radius: 10px; padding: 18px 20px; margin-bottom: 16px;
+    }
+    .alert .row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+    .alert .cid { font-size: 17px; font-weight: 600; }
+    .alert .score {
+      font-variant-numeric: tabular-nums; color: var(--coral); font-weight: 700; font-size: 17px;
+    }
+    .alert .ts { color: #8b909c; font-size: 12px; margin-top: 2px; }
+    .btns { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    button {
+      flex: 1 1 auto; min-width: 120px; cursor: pointer; border: none; border-radius: 8px;
+      padding: 12px 14px; font-size: 14px; font-weight: 600; color: white;
+      transition: transform .05s ease, filter .15s ease;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:active { transform: translateY(1px); }
+    .b-bearing { background: var(--purple); }
+    .b-imbalance { background: var(--teal); }
+    .b-dismiss { background: #3a3e49; }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--teal); color: white; padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; opacity: 0; transition: opacity .2s ease; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .loop { margin-top: 32px; border-top: 1px solid #2c2f38; padding-top: 18px; }
+    .loop-head { display: flex; justify-content: space-between; align-items: center; }
+    .loop-title { color: #8b909c; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; }
+    .b-deploy {
+      flex: 0 0 auto; min-width: 0; background: var(--purple); padding: 10px 16px; font-size: 13px;
+    }
+    .events { list-style: none; padding: 0; margin: 14px 0 0; }
+    .events li {
+      display: flex; gap: 10px; align-items: baseline; padding: 7px 0;
+      border-bottom: 1px solid #23262f; font-size: 13px;
+    }
+    .events .etype { font-weight: 600; }
+    .events .e-retrain_queued .etype { color: var(--purple); }
+    .events .e-deployed .etype { color: var(--purple); }
+    .events .ever { color: var(--paper); font-variant-numeric: tabular-nums; }
+    .events .etime { color: #8b909c; margin-left: auto; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Edge Ops · Operator Labels</h1>
+    <span class="sub">label an alert → retrain data for ML (Contract D)</span>
+  </header>
+  <main>
+    <div id="alerts"></div>
+    <div id="empty" class="empty" hidden>No open alerts. The line is healthy. ✦</div>
+
+    <section class="loop">
+      <div class="loop-head">
+        <span class="loop-title">Model loop</span>
+        <button id="deploy" class="b-deploy">▶ Deploy retrained model</button>
+      </div>
+      <ul id="events" class="events"></ul>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // Bridge base URL: same host as this page, port 8000. Override with ?bridge=...
+    const params = new URLSearchParams(location.search);
+    const BRIDGE = params.get("bridge") || `http://${location.hostname}:8000`;
+    const LINE = params.get("line") || "line1";
+
+    const LABELS = [
+      { key: "bearing wear", cls: "b-bearing", text: "Bearing wear" },
+      { key: "imbalance",    cls: "b-imbalance", text: "Imbalance" },
+      { key: "dismiss",      cls: "b-dismiss", text: "Dismiss" },
+    ];
+
+    function toast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 1800);
+    }
+
+    async function sendLabel(alert, label) {
+      try {
+        const res = await fetch(`${BRIDGE}/label`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            line: LINE,
+            container_id: alert.container_id,
+            label,
+            feature_window_ref: `alert-${alert.id}`,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        toast(`${alert.container_id}: ${label} → sent`);
+        load(); // refresh: the alert should drop out on next bridge tick
+      } catch (e) {
+        toast(`Failed: ${e.message}`);
+      }
+    }
+
+    function render(alerts) {
+      const wrap = document.getElementById("alerts");
+      const empty = document.getElementById("empty");
+      wrap.innerHTML = "";
+      empty.hidden = alerts.length > 0;
+      for (const a of alerts) {
+        const el = document.createElement("div");
+        el.className = "alert";
+        el.innerHTML = `
+          <div class="row">
+            <div>
+              <div class="cid">${a.container_id}</div>
+              <div class="ts">${new Date(a.ts).toLocaleTimeString()}</div>
+            </div>
+            <div class="score">${Number(a.anomaly_score).toFixed(2)}</div>
+          </div>
+          <div class="btns"></div>`;
+        const btns = el.querySelector(".btns");
+        for (const l of LABELS) {
+          const b = document.createElement("button");
+          b.className = l.cls; b.textContent = l.text;
+          b.onclick = () => sendLabel(a, l.key);
+          btns.appendChild(b);
+        }
+        wrap.appendChild(el);
+      }
+    }
+
+    async function load() {
+      try {
+        const res = await fetch(`${BRIDGE}/alerts`);
+        render(await res.json());
+      } catch (e) {
+        document.getElementById("empty").hidden = false;
+        document.getElementById("empty").textContent = `Bridge unreachable at ${BRIDGE}`;
+      }
+    }
+
+    function renderEvents(events) {
+      const ul = document.getElementById("events");
+      ul.innerHTML = "";
+      for (const e of events) {
+        const li = document.createElement("li");
+        li.className = `e-${e.event_type}`;
+        const label = e.event_type === "deployed" ? "deployed" : "retrain queued";
+        li.innerHTML = `
+          <span class="etype">${label}</span>
+          <span class="ever">${e.model_version || e.detail || ""}</span>
+          <span class="etime">${new Date(e.ts).toLocaleTimeString()}</span>`;
+        ul.appendChild(li);
+      }
+    }
+
+    async function loadEvents() {
+      try {
+        const res = await fetch(`${BRIDGE}/model_events`);
+        renderEvents(await res.json());
+      } catch (e) { /* bridge may be briefly unreachable */ }
+    }
+
+    async function deploy() {
+      try {
+        const res = await fetch(`${BRIDGE}/deploy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ line: LINE }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const { model_version } = await res.json();
+        toast(`Deployed ${model_version}`);
+        loadEvents();
+      } catch (e) {
+        toast(`Deploy failed: ${e.message}`);
+      }
+    }
+
+    document.getElementById("deploy").onclick = deploy;
+    load();
+    loadEvents();
+    setInterval(load, 2000); // matches the dashboard's live feel
+    setInterval(loadEvents, 2000);
+  </script>
+</body>
+</html>

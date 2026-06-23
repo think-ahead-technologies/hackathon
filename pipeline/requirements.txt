@@ -1,0 +1,3 @@
+# ABOUTME: Python deps for the model-pipeline + provisioning tools.
+# ABOUTME: cryptography backs the Ed25519 nkey codec used to issue per-device credentials.
+cryptography==48.0.0

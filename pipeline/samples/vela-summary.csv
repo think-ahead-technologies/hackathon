@@ -1,0 +1,2 @@
+network,total_sram_used,total_off_chip_flash_used,cpu_operators,npu_operators,npu_cycles,total_cycles,batch_inference_time
+pdm-anomaly,2816,318,1,41,1850000,1990000,11.7

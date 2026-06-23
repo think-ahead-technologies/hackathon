@@ -1,0 +1,14 @@
+{
+  "_comment": "Fleet inventory for provisioning. Each device gets its own unique nkey; permissions are derived from role + line + id (see provision.py ROLE_TEMPLATES). Add a board by adding a device entry and re-running `make provision`.",
+  "devices": [
+    { "id": "cnc-7", "line": "line1" },
+    { "id": "press-3", "line": "line1" }
+  ],
+  "services": [
+    { "id": "vector", "role": "vector" },
+    { "id": "bridge", "role": "bridge" },
+    { "id": "fakegen", "role": "fakegen", "line": "line1" },
+    { "id": "serial-shim", "role": "fakegen", "line": "line1" },
+    { "id": "pipeline", "role": "pipeline" }
+  ]
+}

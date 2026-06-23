@@ -1,0 +1,8 @@
+{
+  "_comment": "The model contract ML hands over (Contract A). package.py merges this with the computed version, sha256, and flatbuffer size into the signed manifest the firmware validates on load.",
+  "model_id": "pdm-anomaly",
+  "target": "pse84/ethos-u55-128",
+  "input":  {"shape": [1, 49, 40, 1], "dtype": "int8", "scale": 0.018, "zero_point": -12},
+  "output": {"shape": [1, 2], "dtype": "int8", "scale": 0.004, "zero_point": 0},
+  "arena_bytes": 524288
+}

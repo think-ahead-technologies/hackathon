@@ -1,0 +1,166 @@
+# ABOUTME: Local-first edge ops stack — NATS + bridge + Timescale + Grafana + label-ui.
+# ABOUTME: `docker compose up` brings the whole loop online on one laptop, no cloud required.
+
+services:
+  nats:
+    image: nats:2.14.2-alpine
+    command: ["-js", "-m", "8222"]          # JetStream on; monitoring on :8222
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  timescale:
+    image: timescale/timescaledb:2.27.2-pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # Ordered init: schema first, then the seed sample so the dashboard never opens empty.
+      - ./timescale/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./timescale/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  bridge:
+    build: ./bridge
+    environment:
+      NATS_URL: nats://nats:4222
+      PG_DSN: postgresql://postgres:postgres@timescale:5432/postgres
+      THRESHOLD: "0.60"
+      HTTP_PORT: "8000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: bridge
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz',timeout=2).status==200 else 1)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      nats:
+        condition: service_healthy
+      timescale:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.154.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4318:4318"   # OTLP HTTP (spans/metrics in)
+      - "8889:8889"   # Prometheus exporter (scraped by Prometheus)
+    depends_on:
+      tempo:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  # Sovereign OCI registry for signed model artifacts (the model pipeline's store).
+  # Represents the cloud/registry zone; runs locally here. Host :5001, internal zot:5000.
+  zot:
+    image: ghcr.io/project-zot/zot-linux-arm64:v2.1.2
+    volumes:
+      - ./pipeline/zot-config.json:/etc/zot/config.json:ro
+      - ./pipeline/certs:/etc/zot/certs:ro
+    ports:
+      - "5001:5000"
+
+  vector:
+    image: timberio/vector:0.50.0-debian
+    volumes:
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+    ports:
+      - "9598:9598"   # Prometheus exporter (boundary enforcement metrics)
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"   # Tempo API (TraceQL); OTLP 4317/4318 stay internal
+
+  grafana:
+    image: grafana/grafana:12.4.4
+    environment:
+      # Anonymous viewer so the demo needs no login on stage.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescale:
+        condition: service_healthy
+
+  label-ui:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./label-ui:/usr/share/nginx/html:ro
+
+  # Dev-only: synthetic Contract B telemetry so Phase 1 works with no board.
+  # Disabled by default; bring it up with `docker compose --profile fake up`.
+  fakegen:
+    build: ./fakegen
+    environment:
+      NATS_URL: nats://nats:4222
+      LINE: line1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: fakegen
+    profiles: ["fake"]
+    depends_on:
+      nats:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  # Phase 2: read Contract B off the board's USB-UART and publish it to the fabric.
+  # Linux edge nodes can pass the serial device through (set SERIAL_PORT); on macOS,
+  # Docker can't reach USB serial — run the shim on the host instead (see README / `make serial-shim`).
+  serial-shim:
+    build: ./serial-shim
+    environment:
+      NATS_URL: nats://nats:4222
+      LINE: line1
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyACM0}
+      SERIAL_BAUD: ${SERIAL_BAUD:-115200}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: serial-shim
+    devices:
+      - ${SERIAL_PORT:-/dev/ttyACM0}:${SERIAL_PORT:-/dev/ttyACM0}
+    profiles: ["serial"]
+    depends_on:
+      nats:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started

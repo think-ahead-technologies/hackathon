@@ -1,0 +1,46 @@
+# ABOUTME: Provisions Timescale as the single Grafana datasource (Postgres protocol).
+# ABOUTME: Config-in-Git — the same reproducibility story as the model pipeline.
+
+apiVersion: 1
+
+datasources:
+  - name: Timescale
+    uid: timescale
+    type: postgres
+    access: proxy
+    url: timescale:5432
+    user: postgres
+    jsonData:
+      database: postgres
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: true
+    secureJsonData:
+      password: postgres
+    isDefault: true
+    editable: false
+
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s
+    editable: false
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Correlate traces with the metrics/service-graph in Prometheus.
+      serviceMap:
+        datasourceUid: prometheus
+      tracesToMetrics:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+    editable: false

@@ -1,0 +1,61 @@
+# ABOUTME: OpenTelemetry Collector — receives spans from the edge path, derives latency
+# ABOUTME: histograms via the spanmetrics connector, and exposes them for Prometheus.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+connectors:
+  # Turn spans into RED metrics: one duration histogram per span name (= per hop),
+  # plus a call counter. This is what makes the latency panel real, not derived.
+  spanmetrics:
+    namespace: spanmetrics
+    histogram:
+      explicit:
+        buckets: [1ms, 2ms, 5ms, 10ms, 20ms, 50ms, 100ms, 200ms, 500ms, 1s]
+    dimensions:
+      - name: data.classification
+    metrics_flush_interval: 5s
+
+  # Derives the service map (edge -> cloud) from CLIENT/SERVER span pairs.
+  service_graph:
+    latency_histogram_buckets: [1ms, 2ms, 5ms, 10ms, 50ms, 100ms, 500ms]
+    # No phantom "unknown" nodes: drop unpaired client spans instead of drawing an
+    # edge to a virtual uninstrumented downstream (mostly startup residue otherwise).
+    virtual_node_peer_attributes: []
+    store:
+      # Generous window: client (fabric.publish) and server (cloud.ingest) spans
+      # arrive via separate batch exporters, so don't pair them on a tight clock.
+      ttl: 30s
+      max_items: 10000
+
+exporters:
+  # Prometheus scrapes this endpoint for spanmetrics, service-graph, and OTLP metrics
+  # (e.g. egress_bytes from the device).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    enable_open_metrics: true
+  # Forward the raw traces to Tempo for the waterfall view.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    # Tempo needs ~15s to become ready after start; keep retrying fast so the
+    # collector self-heals on a cold `up` instead of waiting out a long backoff.
+    retry_on_failure:
+      max_interval: 5s
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [spanmetrics, service_graph, otlp/tempo, debug]
+    metrics:
+      receivers: [otlp, spanmetrics, service_graph]
+      exporters: [prometheus]

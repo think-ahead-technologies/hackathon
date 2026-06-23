@@ -1,0 +1,46 @@
+# ABOUTME: Overlay that runs the stack under per-identity nkey auth + TLS (CRA secure-by-default).
+# ABOUTME: Use via `make up-secure` (exports Vector's nkey/seed) after `make provision`.
+
+services:
+  nats:
+    # Load the generated auth+TLS config instead of the open demo flags. JetStream + monitoring +
+    # the tls{} block live in nats-server.conf (see provision.py / `make provision`).
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    volumes:
+      - ./nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - ./nats/tls:/etc/nats/tls:ro
+
+  bridge:
+    # Each service presents its own issued seed and verifies the server cert against the CA.
+    environment:
+      NATS_NKEY_SEED: /creds/bridge.nk
+      NATS_CA_FILE: /etc/nats/tls/ca.pem
+    volumes:
+      - ./nats/creds:/creds:ro
+      - ./nats/tls:/etc/nats/tls:ro
+
+  vector:
+    # Vector needs both the public nkey and the seed; `make up-secure` exports them from the seed file.
+    command: ["--config=/etc/vector/vector.secure.yaml"]
+    environment:
+      VECTOR_NATS_NKEY: ${VECTOR_NATS_NKEY:-}
+      VECTOR_NATS_SEED: ${VECTOR_NATS_SEED:-}
+    volumes:
+      - ./vector/vector.secure.yaml:/etc/vector/vector.secure.yaml:ro
+      - ./nats/tls:/etc/nats/tls:ro
+
+  fakegen:
+    environment:
+      NATS_NKEY_SEED: /creds/fakegen.nk
+      NATS_CA_FILE: /etc/nats/tls/ca.pem
+    volumes:
+      - ./nats/creds:/creds:ro
+      - ./nats/tls:/etc/nats/tls:ro
+
+  serial-shim:
+    environment:
+      NATS_NKEY_SEED: /creds/serial-shim.nk
+      NATS_CA_FILE: /etc/nats/tls/ca.pem
+    volumes:
+      - ./nats/creds:/creds:ro
+      - ./nats/tls:/etc/nats/tls:ro
