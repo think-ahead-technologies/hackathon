@@ -1,0 +1,25 @@
+clip,t_start_s,t_end_s,fault,type,notes
+1,0.0,5.0,0,-,background nnoise
+2,5.0,10.0,0,-,background noise
+3,10.0,15.0,0,-,background noise
+4,15.0,20.0,0,-,background noise
+5,20.0,25.0,0,rattle,
+6,25.0,30.0,0,rattle,
+7,30.0,35.0,0,rattle,rattle at the end
+8,35.0,40.0,0,rattle,
+9,40.0,45.0,0,-,background noise
+10,45.0,50.0,0,-,background noise
+11,50.0,55.0,0,rattle,
+13,60.0,65.0,0,rattle,
+14,65.0,70.0,1,squeal,
+15,70.0,75.0,1,rattle,stronger rattle
+17,80.0,85.0,0,-,engine and rattle
+18,85.0,90.0,0,-,people spe
+20,95.0,100.0,0,rattle,
+22,105.0,110.0,1,rattle,stronger rattle
+23,110.0,115.0,0,rattle,stronger rattle
+26,125.0,130.0,1,other,vibration
+37,180.0,185.0,1,squeal,
+38,185.0,190.0,1,rattle,stronger rattle
+43,210.0,215.0,0,rattle,stronger rattle
+46,225.0,230.0,0,rattle,
