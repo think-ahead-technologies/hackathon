@@ -25,6 +25,15 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
 - `localize.py` — phase 4 (§6): signed-gyro turn detection, figure-8 crossover landmarks, lap
   segmentation, route-variant clustering, per-variant `TrackHealthMap`, track-vs-onboard contrast.
 - `localize_eval.py` — phase 4 demo on real recordings.
+- `audio.py` — **acoustic** wear path over the 16 kHz mic recording. Per-window linear-tri band
+  energies (8 kHz Nyquist — the spectral resolution the IMU never had), scored by the same
+  `PerUnitBaselineDetector` but fit **self-referentially**: with no healthy recording, the mostly-
+  nominal run is its own baseline and the built-in track errors surface as the high-energy minority.
+- `audio_eval.py` — runs the acoustic scan on a recording and clusters the flagged windows into
+  events (the track errors recur across laps): `python -m wear_detector.audio_eval data/test1/<rec>.wav`.
+- `io_imu.py::load_imu_csv` — loader for the merged-recorder CSV (`data/test1/*.csv`): 100 Hz IMU in
+  SI units, bursty timestamps reconstructed to a uniform timeline. `iter_windows` takes a `.csv` path
+  and a `session_label` for the unlabeled recordings (e.g. tag a whole fault session `"fault"`).
 - `export/` — turns this detector into an **on-device int8 `.tflite`**: a healthy-only
   autoencoder whose encoder (`[1,49,40,1] → [1,K]`) Vela maps 100% onto the Ethos-U55. The device
   scores L2 distance to a per-unit healthy centroid (this baseline, in a learned feature space), so
@@ -47,7 +56,23 @@ pipeline (gate → cosign → registry → A/B device swap) ships it. Result: **
 .venv/bin/python wear_detector/localize_eval.py      # phase-4 localization demo
 .venv/bin/python -m wear_detector.emit_contract_b \
     thinkathon_kickstart/data/<session> --container unit-08   # NDJSON Contract B
+.venv/bin/python -m wear_detector.audio_eval \
+    data/test1/merged_20260623_17xx.wav                      # acoustic anomaly events
 ```
+
+## Acoustic anomaly path (16 kHz, no healthy data)
+
+`data/test1/` is a single recording from a track with **faults built in** — and there is no healthy
+recording to fit against. Two facts drive the approach: the IMU upgrade to 100 Hz is real but its
+8 kHz-short Nyquist still hides the bearing/wear band, while the 16 kHz **mic** reaches it; and the
+faults are *in the track*, so they recur at fixed positions lap after lap while most of the run is
+nominal. So `audio.py` fits the robust per-unit baseline (median/MAD) on the session's **own**
+windows — the nominal majority defines "normal," and the track errors stand out as the high-energy
+minority. The directed score (wear only adds energy) and the empirical-CDF mapping are unchanged from
+the IMU detector; only the front-end (band energies of the audio window) and the baseline source
+(self vs. a separate healthy unit) differ. On `data/test1` this surfaces ~9 distinct anomaly events
+across the 270 s run — candidate track-error positions. Without a healthy reference this is detection,
+not calibrated FPR; a healthy lap recording would turn the self-baseline back into a true per-unit one.
 
 ## Results on the 50 Hz recordings
 
