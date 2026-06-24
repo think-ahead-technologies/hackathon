@@ -7,6 +7,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Fixed by the model contract (model-meta.json / baseline.json feature_config @ fs=50 Hz).
 #define FEAT_N_FRAMES 49
 #define FEAT_N_BANDS  40
@@ -26,5 +30,9 @@
 //   dynamic magnitude (gravity removed) -> Hann -> rfft power -> linear-tri 40-band
 //   filterbank -> log1p(power/1e-3) -> round-half-to-even(/scale + zp) clipped int8.
 int features_from_accel(const float *accel, int n_samples, int8_t out[FEAT_OUT_LEN]);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // FEATURES_H

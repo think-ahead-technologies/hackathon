@@ -17,6 +17,7 @@
 #include "model_slot.h"
 #include "nats_proto.h"
 #include "platform_hal.h"
+#include "shared_score.h"
 #include "shadow.h"
 
 // ---- demo configuration -----------------------------------------------------
@@ -55,6 +56,7 @@ static const shadow_policy_t SHADOW = {
 static bool          g_shadowing = false;
 static slot_id_t     g_candidate_slot;
 static shadow_stats_t g_shadow;
+
 
 // ---- Contract C deploy session ---------------------------------------------
 #define DEPLOY_MANIFEST_MAX 1024u
@@ -296,17 +298,10 @@ int device_main(void) {
             }
         }
 
-        // One sensor window -> features -> inference -> publish.
-        int8_t features[49 * 40];   // TODO(bsp): fill from the FFT/RMS feature extractor
-        memset(features, 0, sizeof(features));
-        float candidate_score = 0.0f;
-        bool have_candidate = false;
-        float score = model_loader_infer(features, sizeof(features),
-                                         &candidate_score, &have_candidate);
+        // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score arrives
+        // over the shared SOCMEM mailbox. CM33-NS just forwards it to NATS. Until CM55 has
+        // produced its first score (magic unset), publish 0.
+        float score = (SHARED_SCORE->magic == SHARED_SCORE_MAGIC) ? SHARED_SCORE->score : 0.0f;
         publish_score(sock, score);
-
-        if (g_shadowing && have_candidate) {
-            evaluate_shadow(score, candidate_score);
-        }
     }
 }

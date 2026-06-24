@@ -54,6 +54,8 @@ VERBOSE=
 # added to the build
 #
 COMPONENTS+=FREERTOS LWIP MBEDTLS SECURE_SOCKETS
+# No ML on CM33: inference runs on CM55 + the Ethos-U55 NPU; CM33-NS handles Wi-Fi/NATS and
+# forwards the score from the shared SOCMEM mailbox (see shared_score.h / proj_cm55).
 
 # Like COMPONENTS, but disable optional code that was enabled by default.
 DISABLE_COMPONENTS=
@@ -65,9 +67,9 @@ CORE_NAME=CM33_0
 # tree for source code and builds it. The SOURCES variable can be used to
 # manually add source code to the build process from a location not searched
 # by default, or otherwise not found by the build system.
-# Pull in the vendor-neutral firmware logic + HAL from ../../firmware (single source
-# of truth, shared with the host test build). model_loader.cc (TFLM) is intentionally
-# excluded for the connectivity build — model_loader_stub.c stands in for it.
+# Pull in the vendor-neutral firmware logic + HAL from ../../firmware (single source of truth,
+# shared with the host test build). CM33 does NOT run the model — model_loader_stub.c satisfies
+# the deploy/shadow path; the real inference is on CM55 (proj_cm55) and arrives via shared SOCMEM.
 FW_SRC := ../../firmware/src
 SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/model_contract.c \

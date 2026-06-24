@@ -7,6 +7,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SCORE_EMBED_DIM 8
 
 // Per-unit commissioning baseline (baseline.json). The centroid is this unit's healthy
@@ -31,5 +35,9 @@ float score_dwell(dwell_t *st, float distance);
 
 // Alert when the smoothed distance exceeds the unit threshold.
 static inline bool score_alert(float smoothed) { return smoothed > SCORE_THRESHOLD; }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // SCORE_H

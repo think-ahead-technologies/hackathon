@@ -36,6 +36,10 @@
 #include "cyabs_rtos.h"
 #include "cyabs_rtos_impl.h"
 #include "cy_time.h"
+#include "npu_infer.h"
+#include "features.h"
+#include "score.h"
+#include "shared_score.h"
 
 /*******************************************************************************
  * Macros
@@ -130,13 +134,35 @@ static void setup_clib_support(void)
 *  void
 *
 *******************************************************************************/
+/* NPU inference task: run the Vela wear model on the Ethos-U55, dwell-smooth the score, and
+ * publish it to CM33-NS via the shared SOCMEM mailbox (CM33 forwards it to NATS).
+ * TODO(imu): replace the zeroed window with a real accel window via features_from_accel(). */
 static void cm55_task(void * arg)
 {
     CY_UNUSED_PARAMETER(arg);
+
+    SHARED_SCORE->magic = 0;   /* not ready yet */
+
+    if (!npu_infer_init())
+    {
+        for (;;) { vTaskSuspend(NULL); }   /* NPU bring-up failed */
+    }
+
+    static float accel_window[FEAT_WINDOW_SAMPLES * 3]; /* TODO(imu): fill from I2C IMU @ 50 Hz */
+    static int8_t features[FEAT_OUT_LEN];
+    static dwell_t dwell;                                /* zero-initialized */
     for (;;)
     {
-        /* Suspend the task to enter deepsleep */
-        vTaskSuspend(NULL);
+        /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
+        features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
+        float score = npu_infer(features, FEAT_OUT_LEN);
+        if (score >= 0.0f)
+        {
+            SHARED_SCORE->score = score_dwell(&dwell, score);
+            SHARED_SCORE->seq++;
+            SHARED_SCORE->magic = SHARED_SCORE_MAGIC;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 

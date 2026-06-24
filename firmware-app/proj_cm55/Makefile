@@ -53,7 +53,10 @@ VERBOSE=
 # ... then code in directories named COMPONENT_foo and COMPONENT_bar will be
 # added to the build
 #
-COMPONENTS+=FREERTOS RTOS_AWARE  
+COMPONENTS+=FREERTOS RTOS_AWARE
+# ml-tflite-micro runtime interpreter + Ethos-U55 NPU (U55) + int8 kernels. CM55 is the
+# high-performance core that drives the NPU and runs the Vela-compiled wear model.
+COMPONENTS+=ML_TFLM ML_INT8x8 U55
 
 # Like COMPONENTS, but disable optional code that was enabled by default.
 DISABLE_COMPONENTS=
@@ -61,18 +64,21 @@ DISABLE_COMPONENTS=
 CORE=CM55
 CORE_NAME=CM55_0
 
-# By default the build system automatically looks in the Makefile's directory
-# tree for source code and builds it. The SOURCES variable can be used to
-# manually add source code to the build process from a location not searched
-# by default, or otherwise not found by the build system.
-SOURCES+=
+# NPU inference path: features (shared C) + L2 scoring + the embedded Vela model + the
+# ml-middleware glue (npu_infer.c). Shared with the host build for features/score.
+FW_SRC := ../../firmware/src
+SOURCES+=$(FW_SRC)/features.c \
+         $(FW_SRC)/score.c \
+         $(FW_SRC)/model_vela_data.c \
+         $(FW_SRC)/npu_infer.c
 
 # Like SOURCES, but for include directories. Value should be paths to
 # directories (without a leading -I).
-INCLUDES+=
+INCLUDES+=../../firmware/include
 
 # Add additional defines to the build process (without a leading -D).
 DEFINES+=CY_RETARGET_IO_CONVERT_LF_TO_CRLF
+DEFINES+=TF_LITE_STATIC_MEMORY TF_LITE_STRIP_ERROR_STRINGS
 
 # Select softfp or hardfp floating point. Default is softfp.
 VFP_SELECT+=
