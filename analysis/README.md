@@ -172,6 +172,20 @@ vague "vibration" clip; the one false-alarm is a loud-but-not-flagged "rattle" c
 ([0.44, 1.00]); the **single physical indicator is the robust, presentable result** —
 and it vindicates the high-frequency / on-device case.
 
+Run **continuously** (0.5 s windows, smoothed over 2 s since faults are sustained) it
+becomes a real-time detector:
+
+![audio continuous detector](figures/audio-continuous.png)
+
+Two honest notes: (1) at fine resolution in this busy, sparsely-labelled recording it
+is noisier (AUC 0.81, false-positive rate 0.26) — the clip-level median stays the
+headline; many extra detections fall on *unlabelled* time, which could be real faults
+(only 24 clips were labelled) or environmental noise. (2) The lower panel shows faults
+are **broadband-louder** than silence (~10–15× across the spectrum); the high band wins
+as a *discriminator* not because the fault energy is uniquely there, but because the
+competing non-fault sounds (speech, engine rumble) sit in the low band — so the high
+band has the best signal-to-interference ratio.
+
 The matching **1600 Hz** IMU recording confirms the bottleneck story: the device clock
 shows true 1600 Hz sampling, but only ~165 Hz average reaches us — it arrives in bursts
 because **transfer, not the sensor, is the limit**. On-device inference sidesteps that.
@@ -180,15 +194,21 @@ because **transfer, not the sensor, is the limit**. On-device inference sidestep
 
 ## The feedback loop (the engine of the system)
 
-![feedback loop potential](figures/feedback-loop-potential.png)
+The shape of what you'd see in service — the system gets better the more it's used:
 
-Simulated: representative real labels cut the miss-rate by **~⅓** with a few hundred
-corrections. **Design warning from the simulation:** labelling *only the items the
-model flags* (uncertainty/triage-only) did **not** help and trended worse — fuzzy
-boundary labels, and the normal region never gets re-confirmed. So the UI should also
-surface a small **random sample of normal running** to confirm, treat edge labels as
-noisy, retrain periodically, and **calibrate the threshold directly from the FP/FN
-marks** (a live field estimate of the error rates), favouring low miss-rate.
+![feedback loop concept](figures/feedback-loop-concept.png)
+
+*(Illustrative. We ran an active-learning simulation to back the shape up —
+`figures/feedback-loop-potential.png`: representative real labels cut the miss-rate by
+**~⅓** with a few hundred corrections.)*
+
+**Design warning from that simulation:** labelling *only the items the model flags*
+(uncertainty / triage-only) did **not** help and trended worse — fuzzy boundary labels,
+and the normal region never gets re-confirmed. So the user interface should also surface
+a small **random sample of normal running** to confirm, treat edge labels as noisy,
+retrain periodically, and **calibrate the threshold directly from the technician's
+false-alarm / missed-fault marks** (a live field estimate of the error rates),
+favouring a low miss-rate.
 
 ---
 
