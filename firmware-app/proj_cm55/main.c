@@ -36,6 +36,8 @@
 #include "cyabs_rtos.h"
 #include "cyabs_rtos_impl.h"
 #include "cy_time.h"
+#include <string.h>
+
 #include "npu_infer.h"
 #include "features.h"
 #include "score.h"
@@ -135,14 +137,45 @@ static void setup_clib_support(void)
 *  void
 *
 *******************************************************************************/
-/* NPU inference task: run the Vela wear model on the Ethos-U55, dwell-smooth the score, and
- * publish it to CM33-NS via the shared SOCMEM mailbox (CM33 forwards it to NATS).
- * TODO(imu): replace the zeroed window with a real accel window via features_from_accel(). */
+/* Apply one model-control command from CM33 (loads run a model from a QSPI flash slot via SMIF XIP;
+ * promote/clear adjust the candidate role). Resets the affected dwell so a new model's scores are
+ * smoothed from scratch; on promote the candidate's smoothing history carries over to active.
+ * Returns the status to report back to CM33 (0 = OK, <0 = the load failed). */
+static int cm55_apply_ctrl(const volatile shared_model_ctrl_t *ctrl,
+                           dwell_t *active_dwell, dwell_t *cand_dwell)
+{
+    score_params_t params = ctrl->params;   /* copy out of shared memory before use */
+    switch (ctrl->cmd)
+    {
+        case MC_LOAD_ACTIVE:
+            memset(active_dwell, 0, sizeof(*active_dwell));
+            return npu_load_slot(NPU_ACTIVE, ctrl->target_offset, ctrl->target_len, &params) ? 0 : -1;
+        case MC_LOAD_CANDIDATE:
+            memset(cand_dwell, 0, sizeof(*cand_dwell));
+            return npu_load_slot(NPU_CANDIDATE, ctrl->target_offset, ctrl->target_len, &params) ? 0 : -1;
+        case MC_PROMOTE:
+            npu_promote_candidate();
+            *active_dwell = *cand_dwell;     /* candidate is now active — keep its smoothing history */
+            return 0;
+        case MC_CLEAR_CAND:
+            npu_clear_candidate();
+            return 0;
+        default:
+            return 0;
+    }
+}
+
+/* NPU inference task: run the active wear model (and a candidate while one is being shadowed) on the
+ * Ethos-U55, dwell-smooth the scores, and publish them to CM33-NS via the shared SOCMEM mailbox.
+ * CM33 forwards the active score to NATS and owns the shadow promote/rollback verdict; this task
+ * also services CM33's model-control commands (load from flash slot, promote, clear) at the top of
+ * each window. */
 static void cm55_task(void * arg)
 {
     CY_UNUSED_PARAMETER(arg);
 
-    SHARED_SCORE->magic = 0;   /* not ready yet */
+    SHARED_SCORE->magic = 0;            /* not ready yet */
+    SHARED_SCORE->have_candidate = 0;
 
     if (!npu_infer_init() || !imu_init())
     {
@@ -151,9 +184,27 @@ static void cm55_task(void * arg)
 
     static float accel_window[FEAT_WINDOW_SAMPLES * 3];
     static int8_t features[FEAT_OUT_LEN];
-    static dwell_t dwell;                                /* zero-initialized */
+    static dwell_t active_dwell;                          /* zero-initialized */
+    static dwell_t cand_dwell;                            /* reset whenever a candidate loads */
+
+    /* Baseline the command counter so steady-state commands (deploys) are applied exactly once.
+     * Boot-time active-load ordering (CM33 posting before this task polls) is handled by the boot
+     * sequence (docs §6); until then npu_infer_init's baked model serves as the active model. */
+    volatile shared_model_ctrl_t *ctrl = SHARED_MODEL_CTRL;
+    uint32_t last_cmd = ctrl->cmd_seq;
+
     for (;;)
     {
+        /* Service a pending model-control command before sampling this window. */
+        if (ctrl->cmd_seq != last_cmd)
+        {
+            int status = cm55_apply_ctrl(ctrl, &active_dwell, &cand_dwell);
+            ctrl->status = status;
+            __DMB();                       /* status visible to CM33 before the ack */
+            ctrl->ack_seq = ctrl->cmd_seq;
+            last_cmd = ctrl->cmd_seq;
+        }
+
         /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. */
         for (int i = 0; i < FEAT_WINDOW_SAMPLES; i++)
         {
@@ -163,14 +214,30 @@ static void cm55_task(void * arg)
 
         /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
         features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
-        float score = npu_infer(features, FEAT_OUT_LEN);
-        if (score >= 0.0f)
+        float active = npu_run(NPU_ACTIVE, features, FEAT_OUT_LEN);
+        if (active >= 0.0f)
         {
             /* Mirror the window into the mailbox so CM33 can publish it for Contract E capture. */
             for (int i = 0; i < FEAT_OUT_LEN; i++) {
                 SHARED_SCORE->features[i] = features[i];
             }
-            SHARED_SCORE->score = score_dwell(&dwell, score);
+            SHARED_SCORE->score = score_dwell(&active_dwell, active);
+
+            /* Shadow: run the candidate on the SAME window so CM33 can compare apples to apples. */
+            if (npu_role_loaded(NPU_CANDIDATE))
+            {
+                float cand = npu_run(NPU_CANDIDATE, features, FEAT_OUT_LEN);
+                if (cand >= 0.0f) {
+                    SHARED_SCORE->candidate_score = score_dwell(&cand_dwell, cand);
+                    SHARED_SCORE->have_candidate = 1;
+                } else {
+                    SHARED_SCORE->have_candidate = 0;
+                }
+            } else {
+                SHARED_SCORE->have_candidate = 0;
+            }
+
+            __DMB();                       /* score data visible before magic/seq announce it */
             SHARED_SCORE->seq++;
             SHARED_SCORE->magic = SHARED_SCORE_MAGIC;
         }

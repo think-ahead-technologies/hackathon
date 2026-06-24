@@ -32,7 +32,13 @@ bool model_loader_load_candidate(slot_id_t slot);
 float model_loader_infer(const int8_t *features, size_t len,
                          float *candidate_out, bool *have_candidate);
 
-// Drop the candidate interpreter (after a promote or a rollback decision).
+// Promote the candidate to active after the shadow verdict says so. The caller flips the
+// persistent metadata first (so a reboot loads the new active); this makes the live runtime match —
+// the candidate becomes active and the candidate role is cleared. Returns false if the runtime could
+// not promote. (In the CM55 architecture this is a pointer-swap on CM55, not a flash reload.)
+bool model_loader_promote(void);
+
+// Drop the candidate interpreter (after a rollback decision).
 void model_loader_clear_candidate(void);
 
 #ifdef __cplusplus

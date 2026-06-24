@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "score.h"
+
 // Two slots give atomic promotion + instant rollback: always write the INACTIVE
 // slot, flip `active` only after verification, flip back to recover. (model-pipeline.md Part 2.)
 typedef enum {
@@ -17,12 +19,14 @@ typedef enum {
 
 // One model slot's metadata, mirrored in the tiny atomic metadata region of QSPI flash.
 typedef struct {
-    uint32_t flash_offset;  // where this slot's flatbuffer lives in QSPI
-    uint32_t len;           // flatbuffer length in bytes
-    uint8_t  sha256[32];    // expected digest of the flatbuffer
-    uint8_t  sig[64];       // detached ECDSA-P256 sig over the model's manifest (deploy-time auth)
-    char     version[48];   // e.g. "pdm-anomaly@2026.06.15-a3f1"
-    bool     valid;         // written + verified; only a valid slot may be promoted
+    uint32_t       flash_offset;  // where this slot's flatbuffer lives in QSPI
+    uint32_t       len;           // flatbuffer length in bytes
+    uint8_t        sha256[32];    // expected digest of the flatbuffer
+    uint8_t        sig[64];       // detached ECDSA-P256 sig over the model's manifest (deploy-time auth)
+    char           version[48];   // e.g. "pdm-anomaly@2026.06.15-a3f1"
+    score_params_t score;         // this model's scoring set (output quant + centroid + threshold),
+                                  // parsed from its manifest — so a load at boot scores it correctly
+    bool           valid;         // written + verified; only a valid slot may be promoted
 } slot_meta_t;
 
 typedef struct {

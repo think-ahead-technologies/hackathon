@@ -80,11 +80,12 @@ static struct {
     bool        manifest_done;
     uint8_t     sig[64];
     bool        sig_done;
-    bool        prepared;    // sig + contract verified, slot erased, ready to stream MODEL
-    slot_id_t   target;
-    uint32_t    target_off;
-    uint8_t     want_sha[32];
-    deploy_rx_t rx;
+    bool           prepared; // sig + contract verified, slot erased, ready to stream MODEL
+    slot_id_t      target;
+    uint32_t       target_off;
+    uint8_t        want_sha[32];
+    score_params_t score;    // this model's scoring set, parsed from the manifest at prepare time
+    deploy_rx_t    rx;
 } g_dep;
 
 static void deploy_session_reset(void) {
@@ -145,6 +146,13 @@ static bool deploy_prepare(void) {
         return false;
     }
 
+    // Scoring params travel with the model (output quant + centroid + threshold). Refuse here, before
+    // touching flash, if they're missing — a model we can't score correctly must not be staged.
+    if (!parse_manifest_scoring(g_dep.manifest, g_dep.manifest_len, &g_dep.score)) {
+        printf("[deploy] refused: missing scoring params\n");
+        return false;
+    }
+
     model_meta_t meta;
     if (!hal_meta_read(&meta)) return false;
     g_dep.target = slot_inactive(meta.active);          // always the INACTIVE slot
@@ -171,7 +179,8 @@ static void deploy_finalize(void) {
     meta.slot[g_dep.target].len = g_dep.rx.total;
     memcpy(meta.slot[g_dep.target].sha256, got, 32);
     memcpy(meta.slot[g_dep.target].sig, g_dep.sig, 64);
-    meta.slot[g_dep.target].valid = true;  // written + verified, but NOT yet active
+    meta.slot[g_dep.target].score = g_dep.score;  // scoring set persists with the slot
+    meta.slot[g_dep.target].valid = true;         // written + verified, but NOT yet active
     if (hal_meta_write(&meta) && model_loader_load_candidate(g_dep.target)) {
         g_candidate_slot = g_dep.target;
         g_shadowing = true;
@@ -228,7 +237,9 @@ static void deploy_on_frame(const deploy_hdr_t *h, const uint8_t *payload) {
     }
 }
 
-// (8) After each shadowed window, decide whether to promote or roll back.
+// (8) After each shadowed window, decide whether to promote or roll back. The active + candidate
+// scores come from CM55 over the shared mailbox (CM55 runs both models on the same window); the
+// verdict stays here, on CM33, in the host-tested shadow logic.
 static void evaluate_shadow(float active_score, float candidate_score) {
     shadow_observe(&g_shadow, active_score, candidate_score);
     switch (shadow_decide(&g_shadow, &SHADOW)) {
@@ -236,8 +247,11 @@ static void evaluate_shadow(float active_score, float candidate_score) {
             return;
         case SHADOW_PROMOTE: {
             model_meta_t meta;
+            // Flip persistent metadata FIRST (so a reboot loads the new active), then swap the live
+            // model on CM55. model_loader_promote() is a pointer-swap there, not a flash reload, and
+            // it clears CM55's candidate role as part of promoting.
             if (hal_meta_read(&meta) && meta_promote(&meta, g_candidate_slot) &&
-                hal_meta_write(&meta) && model_loader_load_active(g_candidate_slot)) {
+                hal_meta_write(&meta) && model_loader_promote()) {
                 printf("[shadow] promoted slot %d\n", g_candidate_slot);
             }
             break;
@@ -245,10 +259,10 @@ static void evaluate_shadow(float active_score, float candidate_score) {
         case SHADOW_ROLLBACK:
             // Leave active_slot untouched; just discard the candidate. (meta_rollback() is
             // for recovering an already-promoted model that later misbehaves.)
+            model_loader_clear_candidate();
             printf("[shadow] rolled back; keeping incumbent\n");
             break;
     }
-    model_loader_clear_candidate();
     g_shadowing = false;
 }
 
@@ -346,10 +360,13 @@ int device_main(void) {
             }
         }
 
-        // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score arrives
-        // over the shared SOCMEM mailbox. CM33-NS just forwards it to NATS. Until CM55 has
-        // produced its first score (magic unset), publish 0.
-        float score = (SHARED_SCORE->magic == SHARED_SCORE_MAGIC) ? SHARED_SCORE->score : 0.0f;
+        // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score (and, while
+        // shadowing a candidate, the candidate's score on the same window) arrive over the shared
+        // SOCMEM mailbox. model_loader_infer reads them; CM33-NS forwards the active score to NATS.
+        // Until CM55 has produced its first score (magic unset), the score is 0.
+        float candidate_score = 0.0f;
+        bool  have_candidate = false;
+        float score = model_loader_infer(NULL, 0, &candidate_score, &have_candidate);
         publish_score(sock, score);
 
         // While listening, record this window whenever the device is on a watched segment.
@@ -365,8 +382,12 @@ int device_main(void) {
                 capture_advance(&g_capture);
             }
         }
-        // Note: on-device shadow promote/rollback (evaluate_shadow) ran when CM33 itself
-        // executed both active + candidate models. In the NPU architecture inference lives on
-        // CM55, so shadowing belongs there; CM33 no longer evaluates it here.
+        // Shadow verdict: while a candidate is being trialled, CM55 scores it on every window and
+        // mirrors that score here. CM33 owns the decision — feed both scores to the host-tested
+        // shadow logic, which promotes (metadata flip + MC_PROMOTE) or rolls back once it has seen
+        // enough windows. The data plane is on CM55; the verdict plane stays on CM33.
+        if (g_shadowing && have_candidate) {
+            evaluate_shadow(score, candidate_score);
+        }
     }
 }

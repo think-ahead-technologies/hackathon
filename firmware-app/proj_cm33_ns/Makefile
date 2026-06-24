@@ -68,8 +68,10 @@ CORE_NAME=CM33_0
 # manually add source code to the build process from a location not searched
 # by default, or otherwise not found by the build system.
 # Pull in the vendor-neutral firmware logic + HAL from ../../firmware (single source of truth,
-# shared with the host test build). CM33 does NOT run the model — model_loader_stub.c satisfies
-# the deploy/shadow path; the real inference is on CM55 (proj_cm55) and arrives via shared SOCMEM.
+# shared with the host test build). CM33 does NOT run the model — model_loader_cm33.c drives the
+# deploy/shadow path by commanding CM55 over shared SOCMEM; the real inference is on CM55
+# (proj_cm55) and the scores arrive back via the same mailbox. score.c provides score_default_params
+# for the boot fallback (the model-carried params seam; see firmware/docs/cm55-model-loading.md).
 FW_SRC := ../../firmware/src
 SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/model_contract.c \
@@ -79,8 +81,9 @@ SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/manifest.c \
          $(FW_SRC)/deploy.c \
          $(FW_SRC)/capture.c \
+         $(FW_SRC)/score.c \
          $(FW_SRC)/platform_hal_pse84.c \
-         $(FW_SRC)/model_loader_stub.c \
+         $(FW_SRC)/model_loader_cm33.c \
          $(FW_SRC)/device_main.c
 
 # Like SOURCES, but for include directories. Value should be paths to

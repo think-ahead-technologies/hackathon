@@ -74,6 +74,30 @@ static bool parse_int_array(const char *p, const char *end, int32_t *out, int n)
     return true;
 }
 
+// Parse the first `n` numbers of a JSON float array into `out`. Buffer is generous: a full-
+// precision double prints to ~20 chars (e.g. -4.9178876876831055).
+static bool parse_float_array(const char *p, const char *end, float *out, int n) {
+    while (p < end && *p != '[') {
+        p++;
+    }
+    if (p >= end) {
+        return false;
+    }
+    p++;  // past '['
+    for (int i = 0; i < n; i++) {
+        char buf[32];
+        p = copy_token(p, end, buf, sizeof(buf));
+        if (buf[0] == '\0') {
+            return false;
+        }
+        out[i] = strtof(buf, NULL);
+        while (p < end && (is_ws(*p) || *p == ',')) {
+            p++;  // to the next element
+        }
+    }
+    return true;
+}
+
 static int hexval(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -174,5 +198,51 @@ bool parse_manifest(const uint8_t *manifest, size_t len, model_contract_t *out, 
     if (!(p = value_after(j, len, "\"sha256\"")) || !parse_hex32(p, end, sha)) {
         return false;
     }
+    return true;
+}
+
+bool parse_manifest_scoring(const uint8_t *manifest, size_t len, score_params_t *out) {
+    const char *j = (const char *)manifest;
+    const char *end = j + len;
+    memset(out, 0, sizeof(*out));
+
+    const char *p;
+    char buf[32];
+
+    // Output quant lives in the output{} object. Bound the search to start at "output" so it can't
+    // pick up input.scale or feature_config.scale_eps; output.scale is the first "scale" after it
+    // (the pipeline emits output before feature_config / embedding, same fixed order parse_manifest
+    // relies on for input-before-output).
+    const char *outk = mem_find(j, len, "\"output\"");
+    if (!outk) {
+        return false;
+    }
+    size_t out_len = (size_t)(end - outk);
+    if (!(p = value_after(outk, out_len, "\"scale\""))) {
+        return false;
+    }
+    copy_token(p, end, buf, sizeof(buf));
+    out->out_scale = strtof(buf, NULL);
+    if (!(p = value_after(outk, out_len, "\"zero_point\""))) {
+        return false;
+    }
+    copy_token(p, end, buf, sizeof(buf));
+    out->out_zero_point = (int32_t)strtol(buf, NULL, 10);
+
+    // Centroid + threshold live in the embedding{} object (the per-unit healthy baseline).
+    const char *emb = mem_find(j, len, "\"embedding\"");
+    if (!emb) {
+        return false;
+    }
+    size_t emb_len = (size_t)(end - emb);
+    if (!(p = value_after(emb, emb_len, "\"centroid\"")) ||
+        !parse_float_array(p, end, out->centroid, SCORE_EMBED_DIM)) {
+        return false;
+    }
+    if (!(p = value_after(emb, emb_len, "\"threshold\""))) {
+        return false;
+    }
+    copy_token(p, end, buf, sizeof(buf));
+    out->threshold = strtof(buf, NULL);
     return true;
 }

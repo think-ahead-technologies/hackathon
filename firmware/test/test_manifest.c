@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "manifest.h"
+#include "score.h"
 #include "test_util.h"
 
 // The pretty-printed manifest the pipeline emits (package.py, indent=2) — whitespace + newlines.
@@ -71,4 +72,28 @@ void run_manifest_tests(void) {
     const char *no_input = "{\"output\":{\"shape\":[1,2]},\"arena_bytes\":1,"
                            "\"sha256\":\"00\"}";
     CHECK(parse_manifest((const uint8_t *)no_input, strlen(no_input), &c2, sha2) == false);
+
+    // --- scoring params (output quant + embedding centroid/threshold) -------------------------
+    // Mirrors pipeline/model-meta.json: the device dequantizes the int8 embedding with output
+    // scale/zero_point, then L2-distances to the per-unit centroid and alerts over threshold.
+    static const char *SCORING =
+        "{\"input\":{\"shape\":[1,49,40,1],\"dtype\":\"int8\",\"scale\":0.0258,\"zero_point\":-128},"
+        "\"output\":{\"shape\":[1,8],\"dtype\":\"int8\",\"scale\":0.2020,\"zero_point\":-9},"
+        "\"arena_bytes\":131072,"
+        "\"feature_config\":{\"n_fft\":16,\"scale_eps\":0.001},"
+        "\"embedding\":{\"score\":\"l2_to_centroid\",\"dim\":8,"
+        "\"centroid\":[0.3362,-2.1457,-4.9178,2.8203,2.2957,2.9266,1.4891,2.7015],"
+        "\"threshold\":21.4134,\"dwell_w\":3},"
+        "\"sha256\":\"8d2314a285349d73cbbbf7f79da8e07d15cdfbefc1463ed6f18e0e5da863052f\"}";
+    score_params_t p;
+    CHECK(parse_manifest_scoring((const uint8_t *)SCORING, strlen(SCORING), &p) == true);
+    // output quant must come from output{}, not feature_config's scale_eps or input's scale.
+    CHECK(fabsf(p.out_scale - 0.2020f) < 1e-6f);
+    CHECK(p.out_zero_point == -9);
+    CHECK(fabsf(p.centroid[0] - 0.3362f) < 1e-4f);
+    CHECK(fabsf(p.centroid[7] - 2.7015f) < 1e-4f);
+    CHECK(fabsf(p.threshold - 21.4134f) < 1e-4f);
+
+    // No embedding block -> rejected (PRETTY has output quant but no centroid/threshold).
+    CHECK(parse_manifest_scoring((const uint8_t *)PRETTY, strlen(PRETTY), &p) == false);
 }

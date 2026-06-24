@@ -15,14 +15,29 @@ const float SCORE_CENTROID[SCORE_EMBED_DIM] = {
 };
 const float SCORE_THRESHOLD = 21.127588272094727f;
 
-float score_distance(const int8_t embedding[SCORE_EMBED_DIM]) {
+void score_default_params(score_params_t *out) {
+    for (int k = 0; k < SCORE_EMBED_DIM; k++) {
+        out->centroid[k] = SCORE_CENTROID[k];
+    }
+    out->threshold      = SCORE_THRESHOLD;
+    out->out_scale      = (float)SCORE_OUT_SCALE;
+    out->out_zero_point = SCORE_OUT_ZP;
+}
+
+float score_distance_with(const int8_t embedding[SCORE_EMBED_DIM], const score_params_t *p) {
     double sumsq = 0.0;
     for (int k = 0; k < SCORE_EMBED_DIM; k++) {
-        double e = ((double)embedding[k] - (double)SCORE_OUT_ZP) * SCORE_OUT_SCALE;
-        double d = e - (double)SCORE_CENTROID[k];
+        double e = ((double)embedding[k] - (double)p->out_zero_point) * (double)p->out_scale;
+        double d = e - (double)p->centroid[k];
         sumsq += d * d;
     }
     return (float)sqrt(sumsq);
+}
+
+float score_distance(const int8_t embedding[SCORE_EMBED_DIM]) {
+    score_params_t def;
+    score_default_params(&def);
+    return score_distance_with(embedding, &def);
 }
 
 float score_dwell(dwell_t *st, float distance) {
