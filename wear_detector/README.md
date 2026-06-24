@@ -39,6 +39,11 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   `host_us = 1e6·t_rel + origin`, so each acoustic anomaly maps to the nearest camera frame on one
   shared clock. `python -m wear_detector.frames data/test1/anomaly_frames` prints the table and
   extracts the matched frames — ground-truth on *what the machine was doing* at each anomaly.
+- `motion_gate.py` — **motion gate**: only assess wear while the unit is actually moving. The carrier
+  rotates through the line under power (tens of dps of yaw) while a parked or hand-held unit sits near
+  zero, so gating each anomaly on the gyro energy at its peak instant drops handling/parked artifacts.
+  Threshold is data-driven (a percentile of the run's windowed gyro RMS), so it isn't a per-rig magic
+  number; an IMU dropout defaults to *keep* (absence of data isn't evidence of rest).
 - `io_imu.py::load_imu_csv` — loader for the merged-recorder CSV (`data/test1/*.csv`): 100 Hz IMU in
   SI units, bursty timestamps reconstructed to a uniform timeline. `iter_windows` takes a `.csv` path
   and a `session_label` for the unlabeled recordings (e.g. tag a whole fault session `"fault"`).
@@ -81,6 +86,16 @@ the IMU detector; only the front-end (band energies of the audio window) and the
 (self vs. a separate healthy unit) differ. On `data/test1` this surfaces ~9 distinct anomaly events
 across the 270 s run — candidate track-error positions. Without a healthy reference this is detection,
 not calibrated FPR; a healthy lap recording would turn the self-baseline back into a true per-unit one.
+
+The camera frames (`frames.py`) ground-truth those events, and they split in two: genuine in-transit
+mechanical pass-bys (the green drive wheel / roller stations) and **operator handling** of the unit
+(legs/gloved hands in frame, mostly at the end of the run). The latter are not machine faults, so
+`motion_gate.py` removes them — an anomaly heard while the unit is parked or being handled (near-zero
+gyro) is dropped. On `data/test1` the gate keeps **5 of 9** events (the in-transit mechanical ones,
+including one over an IMU dropout, kept conservatively) and suppresses **4** (three handling events +
+one parked station-dwell). Limit worth knowing: a handling event *with* motion (an active pickup that
+rotates the unit) can still pass the IMU gate — separating that needs the orientation/gravity vector
+or the camera, not motion energy alone.
 
 ### Localizing it: track defect vs. onboard wear
 

@@ -9,8 +9,9 @@ import zipfile
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from wear_detector import audio
+from wear_detector import audio, motion_gate
 from wear_detector.audio_eval import cluster
+from wear_detector.io_imu import load_merged_csv
 
 # Recorder frame name: ..._f<frame_no>_<host_us>.jpg
 _FRAME_RX = re.compile(r"_f(\d+)_(\d+)\.jpg$")
@@ -85,8 +86,14 @@ def extract_frames(zip_path, names, out_dir):
     return paths
 
 
-def anomaly_event_times(wav_path, window_s=0.5, hop_s=0.25, threshold_pct=97.0, gap_s=3.0):
-    """Peak-score time of each flagged anomaly cluster (audio seconds from start)."""
+def anomaly_event_times(wav_path, window_s=0.5, hop_s=0.25, threshold_pct=97.0, gap_s=3.0,
+                        gate_csv=None, gate_pct=50.0):
+    """Peak-score time of each flagged anomaly cluster (audio seconds from start).
+
+    Pass gate_csv (the merged IMU CSV) to motion-gate the flags first: anomalies that occur
+    while the unit is parked/handled (low gyro energy) are dropped before clustering, so
+    human-handling events never become 'faults'.
+    """
     res = audio.detect_session(wav_path, window_s=window_s, hop_s=hop_s,
                                threshold_pct=threshold_pct)
     t = np.asarray(res["times"]) + window_s / 2.0
@@ -98,19 +105,30 @@ def anomaly_event_times(wav_path, window_s=0.5, hop_s=0.25, threshold_pct=97.0, 
         mask = (t >= lo - 1e-6) & (t <= hi + 1e-6)
         peak_t = t[mask][int(np.argmax(s[mask]))]
         events.append((float(peak_t), float(s[mask].max())))
+
+    if gate_csv is not None and events:
+        t_wall, _accel, gyro, _fs = load_merged_csv(gate_csv)
+        keep = motion_gate.gate_events(t_wall, gyro, [e[0] for e in events],
+                                       t, pct=gate_pct)["keep"]
+        events = [e for e, k in zip(events, keep) if k]
     return events
 
 
-def main(zip_path=DEFAULT_ZIP, csv_path=DEFAULT_CSV, wav_path=DEFAULT_WAV, out_dir=None):
+def main(zip_path=DEFAULT_ZIP, csv_path=DEFAULT_CSV, wav_path=DEFAULT_WAV, out_dir=None,
+         gate=True):
     frames = parse_frame_index(zip_path)
     origin = recording_origin_us(csv_path)
-    events = anomaly_event_times(wav_path)
+    raw = anomaly_event_times(wav_path)
+    events = anomaly_event_times(wav_path, gate_csv=csv_path) if gate else raw
     times = [t for t, _ in events]
     matches = correlate_events(frames, origin, times)
 
     span_s = (frames[-1][1] - frames[0][1]) / 1e6
     print(f"frames : {len(frames)} over {span_s:.1f}s "
           f"(~{len(frames)/span_s:.1f} fps); origin host_us={int(origin)}")
+    if gate:
+        print(f"gate   : motion gate ON -> {len(events)}/{len(raw)} events kept "
+              f"({len(raw) - len(events)} suppressed as parked/handled)")
     print(f"events : {len(events)} acoustic anomalies -> nearest camera frame\n")
     print(f"{'#':>2}  {'t_audio':>8}  {'score':>5}  {'frame#':>7}  {'dt':>7}  file")
     for i, (m, (_, sc)) in enumerate(zip(matches, events), 1):
