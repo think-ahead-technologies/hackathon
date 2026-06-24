@@ -1,0 +1,6 @@
+# ABOUTME: Training/quantize/Vela toolchain for the on-device wear model (Python 3.12).
+# ABOUTME: Separate from the 3.14 runtime detector venv; TF has no 3.14 wheel.
+tensorflow==2.20.0
+ethos-u-vela==5.1.0
+numpy
+scipy
