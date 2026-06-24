@@ -44,3 +44,6 @@ data/test1/anomaly_frames/
 
 # wear detector: derived fault inspection bundles (regenerate with fault_bundle.py)
 data/fault_bundles/
+
+# wear detector: labeling clip grids (regenerate with clip_grid.py)
+data/clip_grids/
