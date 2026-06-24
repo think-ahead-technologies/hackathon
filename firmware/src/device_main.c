@@ -20,8 +20,14 @@
 #include "shadow.h"
 
 // ---- demo configuration -----------------------------------------------------
-#define NATS_HOST   "192.168.1.50"   // edge-node NATS; may also be a cloud hostname (DNS-resolved)
+// NATS_HOST/NATS_PORT are build-overridable (e.g. `make build NATS_HOST=10.0.0.5`); the
+// default is the edge-node demo broker. Host may be a dotted-quad (LAN) or a DNS name (cloud).
+#ifndef NATS_HOST
+#define NATS_HOST   "192.168.1.50"
+#endif
+#ifndef NATS_PORT
 #define NATS_PORT   4222
+#endif
 #define LINE        "line1"
 #define CONTAINER   "cnc-7"
 #define PUB_SUBJECT "edge." LINE "." CONTAINER          // through the Vector boundary

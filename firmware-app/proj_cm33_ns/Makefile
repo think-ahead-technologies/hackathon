@@ -121,6 +121,19 @@ else ifneq ($(WIFI_SSID),)
 DEFINES += WIFI_SSID='"$(WIFI_SSID)"' WIFI_PASSWORD='"$(WIFI_PASSWORD)"'
 endif
 
+# NATS broker target, build-overridable:
+#   make build NATS_HOST=10.247.217.107 NATS_PORT=4222 NATS_DISABLE_TLS=1
+# NATS_DISABLE_TLS=1 selects a plaintext TCP socket (no TLS) for an open broker.
+ifneq ($(NATS_HOST),)
+DEFINES += NATS_HOST='"$(NATS_HOST)"'
+endif
+ifneq ($(NATS_PORT),)
+DEFINES += NATS_PORT=$(NATS_PORT)
+endif
+ifeq ($(NATS_DISABLE_TLS),1)
+DEFINES += NATS_DISABLE_TLS
+endif
+
 # Select softfp or hardfp floating point. Default is softfp.
 VFP_SELECT+=
 

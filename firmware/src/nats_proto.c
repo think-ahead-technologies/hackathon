@@ -85,7 +85,10 @@ int nats_b64_encode(char *out, size_t cap, const uint8_t *data, size_t len) {
 
 int nats_build_pub(char *buf, size_t cap, const char *subject,
                    const uint8_t *payload, size_t payload_len) {
-    int hn = snprintf(buf, cap, "PUB %s %zu\r\n", subject, payload_len);
+    // %lu + cast, not %zu: the target's newlib-nano printf (--specs=nano.specs) does not
+    // support the 'z' length modifier and would emit the literal "zu" as the byte count,
+    // producing a malformed PUB the broker rejects. unsigned long covers any real payload.
+    int hn = snprintf(buf, cap, "PUB %s %lu\r\n", subject, (unsigned long)payload_len);
     if (hn < 0 || (size_t)hn >= cap) return -1;
     size_t total = (size_t)hn + payload_len + 2;  // payload + trailing CRLF
     if (total > cap) return -1;
