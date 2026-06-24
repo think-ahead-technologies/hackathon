@@ -47,8 +47,18 @@ bool hal_nkey_public(char *out, size_t cap);
 // 64-byte raw signature; the caller base64-encodes it for CONNECT. false on failure.
 bool hal_nkey_sign(const uint8_t *nonce, size_t len, uint8_t sig[64]);
 
+// ---- Network bring-up (call ONCE at boot, before any hal_tcp_* call) --------
+// Power up the AIROC Wi-Fi radio over SDIO, start the Wi-Fi Connection Manager as
+// a station, and associate to the provisioned access point so the device has an IP
+// and a route to the cloud. Retries the association internally; returns true once
+// an address is assigned, false if there is no link after all retries. Every
+// hal_tcp_connect() assumes this has already succeeded.
+bool hal_net_init(void);
+
 // ---- Network transport (AIROC CYW55513 Wi-Fi -> TCP) ------------------------
-// Open a TCP connection to the NATS server. Returns >=0 handle, or -1.
+// Open a TCP connection to the NATS broker. `host` may be a dotted-quad IPv4
+// (LAN edge node) or a DNS hostname (a cloud broker) — it is resolved either way.
+// Returns >=0 handle, or -1.
 int  hal_tcp_connect(const char *host, uint16_t port);
 // Send all bytes. Returns bytes sent, or -1.
 int  hal_tcp_send(int sock, const uint8_t *data, size_t len);

@@ -101,8 +101,16 @@ Subjects match the dashboard: the device publishes to `edge.line1.cnc-7` so it c
   `cy_wcm_*` + `cy_socket_*`) but every `VERIFY:` line — flash offsets, the SMIF XIP base, the
   provisioned PSA key id, the QSPI Configurator structs, the `cy_socket_*` enums — must be confirmed
   against the BSP / QSPI Configurator output / arch ref / AN235935. It is **not** compiled or tested here.
-- **Boot bring-up not in the HAL:** `cy_serial_flash_qspi_init()`, `psa_crypto_init()`,
-  `cy_wcm_init()` + `cy_wcm_connect_ap()` — call these once at startup before the HAL is used.
+- **Wi-Fi association (now in the HAL):** `hal_net_init()` in `platform_hal_pse84.c` powers the
+  AIROC radio (SDIO), starts the Wi-Fi Connection Manager as a STA, and associates to the AP — it's
+  the documented `app_sdio_init` + `cy_wcm_init`/`cy_wcm_connect_ap` flow from
+  `mtb-example-wifi-secure-tcp-client`. `device_main.c` calls it once before opening any socket, and
+  `hal_tcp_connect` now DNS-resolves its host so `NATS_HOST` can be a cloud broker name, not just a
+  LAN dotted-quad. ⚠️ Still **unverified on-target** like the rest of the file: confirm the
+  `CYBSP_WIFI_*` Device-Configurator symbols exist in the Wi-Fi-enabled BSP and provision the SSID /
+  password from secure storage (`WIFI_SSID`/`WIFI_PASSWORD` are build-time placeholders).
+- **Remaining boot bring-up not in the HAL:** `cy_serial_flash_qspi_init()` and `psa_crypto_init()` —
+  call these once at startup before the flash / crypto HAL is used.
 - **Metadata atomicity:** done — `hal_meta_write()` uses the two-copy + monotonic-sequence + CRC32
   scheme in `meta_store.c` (host-tested, incl. a crash-mid-write simulation). Embedded just confirms
   the two reserved metadata sectors (`META_FLASH_OFFSET_A`/`_B`) in the QSPI Configurator / linker.

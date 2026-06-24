@@ -35,7 +35,9 @@
 #include "cy_serial_flash_qspi.h"   // SMIF serial-flash middleware
 #include "psa/crypto.h"             // PSA Crypto (Mbed TLS / TF-M backed)
 #include "cy_wcm.h"                 // Wi-Fi Connection Manager
+#include "cy_wcm_error.h"
 #include "cy_secure_sockets.h"      // Secure Sockets (over lwIP); TLS unless -DNATS_DISABLE_TLS
+#include "mtb_hal.h"                // mtb_hal_sdio_t / mtb_hal_gpio_t used by WCM bring-up
 
 // =============================================================================
 //  Flash layout — these offsets come from your flash plan / linker, NOT guesses.
@@ -195,6 +197,111 @@ bool hal_nkey_sign(const uint8_t *nonce, size_t len, uint8_t sig[64]) {
 }
 
 // -----------------------------------------------------------------------------
+//  Wi-Fi bring-up (AIROC CYW55513 over SDIO + Wi-Fi Connection Manager)
+//  Brings the radio up and associates to the AP ONCE at boot, before any socket.
+//  Mirrors the documented flow in mtb-example-wifi-secure-tcp-client / the PSOC
+//  Edge Wi-Fi examples: app_sdio_init() (SDIO transport to the radio) then
+//  cy_wcm_init(STA) + cy_wcm_connect_ap(). VERIFY on-target: the CYBSP_WIFI_*
+//  symbols come from the Device Configurator (present in the Wi-Fi-enabled BSP),
+//  the SDIO frequency/block-size, and the deep-sleep callback wiring.
+// -----------------------------------------------------------------------------
+
+// VERIFY: provision per fleet. In production these come from secure storage (the
+// dashboard's `make provision`), not a compiled-in constant — kept here as the
+// seam, matching how the model-signing key / nkey seed are provisioned.
+#ifndef WIFI_SSID
+#define WIFI_SSID            "MY_WIFI_SSID"
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD        "MY_WIFI_PASSWORD"
+#endif
+#define WIFI_SECURITY_TYPE   CY_WCM_SECURITY_WPA2_AES_PSK
+#define WIFI_MAX_RETRY       (3u)
+
+#define APP_SDIO_INTERRUPT_PRIORITY        (7u)
+#define APP_HOST_WAKE_INTERRUPT_PRIORITY   (2u)
+#define APP_SDIO_FREQUENCY_HZ              (25000000u)
+#define SDHC_SDIO_64BYTES_BLOCK            (64u)
+
+static mtb_hal_sdio_t        g_sdio;
+static cy_stc_sd_host_context_t g_sdhc_ctx;
+static cy_wcm_config_t       g_wcm_config;
+
+static void sdio_interrupt_handler(void) {
+    mtb_hal_sdio_process_interrupt(&g_sdio);
+}
+static void host_wake_interrupt_handler(void) {
+    mtb_hal_gpio_process_interrupt(&g_wcm_config.wifi_host_wake_pin);
+}
+
+// Wire the SDIO bus that carries 802.11 traffic between the host MCU and the radio.
+// Returns false on any setup failure (caller aborts bring-up).
+static bool app_sdio_init(void) {
+    cy_stc_sysint_t sdio_intr_cfg = {
+        .intrSrc = CYBSP_WIFI_SDIO_IRQ, .intrPriority = APP_SDIO_INTERRUPT_PRIORITY,
+    };
+    cy_stc_sysint_t host_wake_intr_cfg = {
+        .intrSrc = CYBSP_WIFI_HOST_WAKE_IRQ, .intrPriority = APP_HOST_WAKE_INTERRUPT_PRIORITY,
+    };
+
+    if (Cy_SysInt_Init(&sdio_intr_cfg, sdio_interrupt_handler) != CY_SYSINT_SUCCESS) {
+        return false;
+    }
+    NVIC_EnableIRQ(CYBSP_WIFI_SDIO_IRQ);
+
+    if (mtb_hal_sdio_setup(&g_sdio, &CYBSP_WIFI_SDIO_sdio_hal_config, NULL, &g_sdhc_ctx)
+            != CY_RSLT_SUCCESS) {
+        return false;
+    }
+
+    Cy_SD_Host_Enable(CYBSP_WIFI_SDIO_HW);
+    Cy_SD_Host_Init(CYBSP_WIFI_SDIO_HW, CYBSP_WIFI_SDIO_sdio_hal_config.host_config, &g_sdhc_ctx);
+    Cy_SD_Host_SetHostBusWidth(CYBSP_WIFI_SDIO_HW, CY_SD_HOST_BUS_WIDTH_4_BIT);
+
+    mtb_hal_sdio_cfg_t sdio_hal_cfg = {
+        .frequencyhal_hz = APP_SDIO_FREQUENCY_HZ, .block_size = SDHC_SDIO_64BYTES_BLOCK,
+    };
+    mtb_hal_sdio_configure(&g_sdio, &sdio_hal_cfg);
+
+    // WL_REG_ON powers the radio; HOST_WAKE lets it wake the host out of sleep.
+    mtb_hal_gpio_setup(&g_wcm_config.wifi_wl_pin, CYBSP_WIFI_WL_REG_ON_PORT_NUM,
+                       CYBSP_WIFI_WL_REG_ON_PIN);
+    mtb_hal_gpio_setup(&g_wcm_config.wifi_host_wake_pin, CYBSP_WIFI_HOST_WAKE_PORT_NUM,
+                       CYBSP_WIFI_HOST_WAKE_PIN);
+
+    if (Cy_SysInt_Init(&host_wake_intr_cfg, host_wake_interrupt_handler) != CY_SYSINT_SUCCESS) {
+        return false;
+    }
+    NVIC_EnableIRQ(CYBSP_WIFI_HOST_WAKE_IRQ);
+    return true;
+}
+
+bool hal_net_init(void) {
+    if (!app_sdio_init()) {
+        return false;
+    }
+
+    g_wcm_config.interface = CY_WCM_INTERFACE_TYPE_STA;
+    g_wcm_config.wifi_interface_instance = &g_sdio;
+    if (cy_wcm_init(&g_wcm_config) != CY_RSLT_SUCCESS) {
+        return false;
+    }
+
+    cy_wcm_connect_params_t connect_param = {0};
+    memcpy(connect_param.ap_credentials.SSID, WIFI_SSID, sizeof(WIFI_SSID));
+    memcpy(connect_param.ap_credentials.password, WIFI_PASSWORD, sizeof(WIFI_PASSWORD));
+    connect_param.ap_credentials.security = WIFI_SECURITY_TYPE;
+
+    cy_wcm_ip_address_t ip_addr;
+    for (uint32_t attempt = 0; attempt < WIFI_MAX_RETRY; attempt++) {
+        if (cy_wcm_connect_ap(&connect_param, &ip_addr) == CY_RSLT_SUCCESS) {
+            return true;   // associated + DHCP lease in hand
+        }
+    }
+    return false;          // no link after all retries — caller must not open sockets
+}
+
+// -----------------------------------------------------------------------------
 //  Network transport (AIROC CYW55513 Wi-Fi -> Secure Sockets over lwIP)
 //  One long-lived NATS connection, so we keep a single static handle; the `int sock`
 //  in the HAL signature is just a 0/-1 status. Secure-by-default: the connection is
@@ -263,14 +370,18 @@ int hal_tcp_connect(const char *host, uint16_t port) {
     cy_socket_sockaddr_t addr = {0};
     addr.port = port;  // host byte order, per cy_socket_sockaddr_t
     addr.ip_address.version = CY_SOCKET_IP_VER_V4;
-    // Minimal dotted-quad parse (no DNS for the demo). ip.v4 is documented as network byte
-    // order: on the little-endian Cortex-M, packing a in the low byte gives bytes [a,b,c,d].
+    // Accept either a dotted-quad (LAN edge node) or a DNS hostname (cloud broker).
+    // Try the literal parse first; if it isn't four octets, resolve via the stack's
+    // DNS. ip.v4 is documented as network byte order: on the little-endian Cortex-M,
+    // packing `a` in the low byte gives bytes [a,b,c,d].
     unsigned a, b, c, d;
-    if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+    if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+        addr.ip_address.ip.v4 = (uint32_t)(a | (b << 8) | (c << 16) | (d << 24));
+    } else if (cy_socket_gethostbyname(host, CY_SOCKET_IP_VER_V4,
+                                       &addr.ip_address) != CY_RSLT_SUCCESS) {
         cy_socket_delete(g_sock);
-        return -1;
+        return -1;  // unresolvable host
     }
-    addr.ip_address.ip.v4 = (uint32_t)(a | (b << 8) | (c << 16) | (d << 24));
 
     // For a TLS socket cy_socket_connect also runs the handshake, verifying the server
     // cert against the root CA pinned above before any NATS byte is exchanged.
