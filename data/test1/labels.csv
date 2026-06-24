@@ -1,0 +1,55 @@
+clip,t_start_s,t_end_s,fault,type,notes
+1,0.0,5.0,0,-,background noise
+2,5.0,10.0,0,-,turntable 
+3,10.0,15.0,0,-,turntable and background noise
+4,15.0,20.0,0,-,background noise
+5,20.0,25.0,0,-,background noise
+6,25.0,30.0,0,rattle,
+7,30.0,35.0,1,rattle,louder rattle
+8,35.0,40.0,1,rattle,louder rattle
+9,40.0,45.0,0,-,background noise
+10,45.0,50.0,0,-,background noise
+11,50.0,55.0,0,-,background noise
+12,55.0,60.0,0,-,background noise
+13,60.0,65.0,0,-,background noise
+14,65.0,70.0,0,-,background noise
+15,70.0,75.0,0,rattle,
+16,75.0,80.0,0,squeal,
+17,80.0,85.0,1,rattle,louder rattle
+18,85.0,90.0,0,-,acceleration and rattle
+19,90.0,95.0,0,-,background noise
+20,95.0,100.0,0,-,rattle and slowing down
+21,100.0,105.0,1,rattle,louder rattle
+22,105.0,110.0,0,rattle,
+23,110.0,115.0,0,rattle,
+24,115.0,120.0,0,rattle,
+25,120.0,125.0,0,rattle,and some enginer
+26,125.0,130.0,0,-,background noise
+27,130.0,135.0,0,-,background noise
+28,135.0,140.0,0,-,background noise
+29,140.0,145.0,0,-,background noise
+30,145.0,150.0,0,rattle,
+31,150.0,155.0,0,rattle,
+32,155.0,160.0,0,rattle,
+33,160.0,165.0,1,squeal,
+34,165.0,170.0,1,rattle,louder rattle
+35,170.0,175.0,0,-,background noise
+36,175.0,180.0,0,-,background noise
+37,180.0,185.0,0,-,background noise
+38,185.0,190.0,0,-,background noise
+39,190.0,195.0,0,-,background noise
+40,195.0,200.0,0,-,background noise
+41,200.0,205.0,0,rattle,
+42,205.0,210.0,0,-,background noise
+43,210.0,215.0,0,-,background noise
+44,215.0,220.0,0,-,background noise
+45,220.0,225.0,0,-,background noise
+46,225.0,230.0,0,-,background noise
+47,230.0,235.0,0,-,background noise
+48,235.0,240.0,0,-,background noise
+49,240.0,245.0,0,rattle,
+50,245.0,250.0,0,-,background noise
+51,250.0,255.0,0,rattle,
+52,255.0,260.0,1,rattle,louder
+53,260.0,265.0,0,rattle,
+54,265.0,270.0,0,rattle,
