@@ -86,7 +86,7 @@
   <main>
     <div class="board">
       <div class="track-wrap">
-        <svg id="track" viewBox="110 0 290 760" role="img" aria-label="Conveyor track loop">
+        <svg id="track" viewBox="10 110 750 290" role="img" aria-label="Conveyor track loop">
           <g id="segments"></g>
           <g id="flags"></g>
         </svg>
@@ -116,7 +116,7 @@
     // and a larger bottom loop sharing a middle crossbar (6 turns, 17 straights; the
     // length-4 pieces are the tall segments). `location` is the segment id the video
     // localizer stamps onto each inference (Contract B).
-    const TRACK = [
+    const TRACK_RAW = [
       // top row
       { id: "turn-1", x: 120, y: 10,  w: 50,  h: 50,  turn: true },
       { id: "seg-1",  x: 180, y: 10,  w: 70,  h: 50  },
@@ -147,6 +147,21 @@
       { id: "seg-17", x: 260, y: 690, w: 70,  h: 50  },
       { id: "turn-6", x: 340, y: 690, w: 50,  h: 50,  turn: true },
     ];
+
+    // Rotate the whole layout 90° clockwise so the tall figure-8 lays sideways
+    // and fits a wide screen. Map (x,y,w,h) -> (H-(y+h), x, h, w); flip the label
+    // rotation flag since pieces that were drawn tall are now drawn wide.
+    const TRACK_H = 760;
+    const TRACK = TRACK_RAW.map(s => ({
+      id: s.id,
+      x: TRACK_H - (s.y + s.h),
+      y: s.x,
+      w: s.h,
+      h: s.w,
+      turn: s.turn,
+      len: s.len,
+      vertical: !s.turn && !s.vertical,
+    }));
 
     const FAULTS = [
       "bearing wear", "imbalance", "turn table",

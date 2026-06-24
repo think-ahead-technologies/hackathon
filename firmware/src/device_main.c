@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "capture.h"
 #include "deploy.h"
 #include "manifest.h"
 #include "model_contract.h"
@@ -38,6 +39,12 @@
 // Contract C artifact stream (chunked frames). Distinct from models.<line>.deploy, which carries
 // the JSON deploy *event* for the dashboard — this subject carries the model *bytes* for devices.
 #define DEPLOY_SUB  "models." LINE ".artifact"
+// Contract E directed-gather: the platform commands a capture on .cmd; the device streams the
+// gathered feature windows back on .data. The .data sink is deliberately OFF edge.> — the Vector
+// minimization boundary blocks raw/features there; operator-gated training capture is the
+// sanctioned exception and rides its own subject (see model-pipeline.md / bridge POST /capture).
+#define CAPTURE_SUB          "capture." LINE "." CONTAINER ".cmd"
+#define CAPTURE_DATA_SUBJECT "capture." LINE "." CONTAINER ".data"
 
 // What this firmware build can accommodate (must match the baked-in arena + pre-processing).
 static const firmware_contract_t FW = {
@@ -56,7 +63,6 @@ static const shadow_policy_t SHADOW = {
 static bool          g_shadowing = false;
 static slot_id_t     g_candidate_slot;
 static shadow_stats_t g_shadow;
-
 
 // ---- Contract C deploy session ---------------------------------------------
 #define DEPLOY_MANIFEST_MAX 1024u
@@ -93,6 +99,29 @@ static void publish_score(int sock, float score) {
                         (double)score);
     char frame[256];
     int flen = nats_build_pub(frame, sizeof(frame), PUB_SUBJECT,
+                              (const uint8_t *)body, (size_t)blen);
+    if (flen > 0) hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
+}
+
+// Publish one gathered feature window to the capture sink, tagged with the command metadata so
+// the collector can bin it (clean baseline vs. failure segment) for retraining. The int8 features
+// are base64-encoded into the JSON envelope. Buffers are static — the b64 of a full window plus
+// the envelope is a few KB, too large for the stack on this loop.
+static void publish_capture_window(int sock, const int8_t *feat, size_t n,
+                                   const capture_entry_t *e, uint32_t seq) {
+    static char b64[((49 * 40 + 2) / 3) * 4 + 4];
+    if (nats_b64_encode(b64, sizeof(b64), (const uint8_t *)feat, n) < 0) return;
+
+    static char body[sizeof(b64) + 256];
+    int blen = snprintf(body, sizeof(body),
+                        "{\"request_id\":\"%s\",\"label\":\"%s\",\"segment\":\"%s\","
+                        "\"seq\":%u,\"container_id\":\"" CONTAINER "\","
+                        "\"data_classification\":\"capture\",\"features_b64\":\"%s\"}",
+                        e->request_id, e->label, e->segment, seq, b64);
+    if (blen < 0 || (size_t)blen >= sizeof(body)) return;
+
+    static char frame[sizeof(body) + 128];
+    int flen = nats_build_pub(frame, sizeof(frame), CAPTURE_DATA_SUBJECT,
                               (const uint8_t *)body, (size_t)blen);
     if (flen > 0) hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
 }
@@ -264,9 +293,9 @@ int device_main(void) {
     if (cn < 0) return 1;
     hal_tcp_send(sock, (const uint8_t *)connect, (size_t)cn);
 
-    // Subscribe to Contract C deploys for this line.
-    char sub[64];
-    int sn = snprintf(sub, sizeof(sub), "SUB %s 1\r\n", DEPLOY_SUB);
+    // Subscribe to Contract C deploys (sid 1) and Contract E capture commands (sid 2).
+    char sub[128];
+    int sn = snprintf(sub, sizeof(sub), "SUB %s 1\r\nSUB %s 2\r\n", DEPLOY_SUB, CAPTURE_SUB);
     hal_tcp_send(sock, (const uint8_t *)sub, (size_t)sn);
 
     for (;;) {
@@ -279,8 +308,8 @@ int device_main(void) {
                     break;
                 case NATS_LINE_MSG: {
                     nats_msg_t msg;
-                    if (nats_parse_msg_header(line, &msg) &&
-                        strcmp(msg.subject, DEPLOY_SUB) == 0) {
+                    if (!nats_parse_msg_header(line, &msg)) break;
+                    if (strcmp(msg.subject, DEPLOY_SUB) == 0) {
                         // The MSG payload is one Contract C frame (header + chunk). Read it, then
                         // parse + route. One NATS message carries at most a header + one chunk.
                         static uint8_t frame[DEPLOY_HDR_BYTES + 4096];
@@ -289,6 +318,22 @@ int device_main(void) {
                             hal_tcp_recv_exact(sock, frame, msg.payload_len) == (int)msg.payload_len &&
                             deploy_parse_header(frame, msg.payload_len, &h)) {
                             deploy_on_frame(&h, frame + DEPLOY_HDR_BYTES);
+                        }
+                    } else if (strcmp(msg.subject, CAPTURE_SUB) == 0) {
+                        // The payload is one Contract E command (small JSON): add a segment to the
+                        // watch-set, or stop listening (clears it). Commands accumulate over time.
+                        static uint8_t cmdbuf[512];
+                        capture_cmd_t cmd;
+                        if (msg.payload_len <= sizeof(cmdbuf) &&
+                            hal_tcp_recv_exact(sock, cmdbuf, msg.payload_len) == (int)msg.payload_len &&
+                            capture_parse_cmd(cmdbuf, msg.payload_len, &cmd)) {
+                            capture_apply(&g_capture, &cmd);
+                            if (cmd.stop) {
+                                printf("[capture] stop listening\n");
+                            } else {
+                                printf("[capture] watching segment=%s label=%s (%u total)\n",
+                                       cmd.segment, cmd.label, g_capture.count);
+                            }
                         }
                     }
                     break;
@@ -303,5 +348,20 @@ int device_main(void) {
         // produced its first score (magic unset), publish 0.
         float score = (SHARED_SCORE->magic == SHARED_SCORE_MAGIC) ? SHARED_SCORE->score : 0.0f;
         publish_score(sock, score);
+
+        // While listening, record this window whenever the device is on a watched segment.
+        if (capture_listening(&g_capture)) {
+            char seg[32];
+            if (!hal_track_segment(seg, sizeof(seg))) seg[0] = '\0';
+            const capture_entry_t *e = capture_match(&g_capture, seg);
+            if (e != NULL) {
+                publish_capture_window(sock, features, sizeof(features), e, g_capture.seq);
+                capture_advance(&g_capture);
+            }
+        }
+
+        if (g_shadowing && have_candidate) {
+            evaluate_shadow(score, candidate_score);
+        }
     }
 }

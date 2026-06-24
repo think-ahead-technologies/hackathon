@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS labels (
   label              text
 );
 
+-- Directed-gather training data (Contract E): windows the device captured on command,
+-- binned by label ("healthy" baseline vs. a fault class) and segment for retraining.
+CREATE TABLE IF NOT EXISTS captures (
+  ts           timestamptz NOT NULL DEFAULT now(),
+  request_id   text,
+  container_id text,
+  label        text,
+  segment      text,
+  seq          int,
+  features_b64 text
+);
+CREATE INDEX IF NOT EXISTS captures_req ON captures (request_id, seq);
+
 -- Model lifecycle events that close the loop: a retrain queued from accumulated
 -- labels, and a deploy delivered over Contract C (models.<line>.deploy).
 CREATE TABLE IF NOT EXISTS model_events (

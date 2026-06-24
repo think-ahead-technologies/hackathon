@@ -72,4 +72,13 @@ int  hal_tcp_recv_line(int sock, char *buf, size_t cap);
 // Read exactly `len` payload bytes (the body following a MSG header). Returns len or -1.
 int  hal_tcp_recv_exact(int sock, uint8_t *buf, size_t len);
 
+// ---- On-device localization (track segment) --------------------------------
+// Copy the id of the track segment the device is in RIGHT NOW (e.g. "seg-4") into `out`,
+// matching the segment ids the platform uses in capture commands and annotations. This is
+// the on-device counterpart of wear_detector/localize.py's figure-8 lap segmentation.
+// Returns false (and leaves `out` empty) when position is not yet known — between segments,
+// before the first lap landmark, or until the localizer is ported on-target. Contract E
+// capture treats an unknown segment as "not in the target segment". STUB today.
+bool hal_track_segment(char *out, size_t cap);
+
 #endif  // PLATFORM_HAL_H

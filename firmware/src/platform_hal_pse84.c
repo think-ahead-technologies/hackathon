@@ -494,6 +494,15 @@ int hal_tcp_recv_exact(int sock, uint8_t *buf, size_t len) {
     return (int)got;
 }
 
+// On-device track localization. STUB: the figure-8 lap segmentation (wear_detector/localize.py)
+// is not ported on-target yet, so position is always "unknown" and Contract E capture falls back
+// to its time-bounded / safety-cap behaviour. When the localizer lands, fill `out` with the
+// current segment id (and return true) so segment-gated capture records exactly one pass.
+bool hal_track_segment(char *out, size_t cap) {
+    if (cap > 0) out[0] = '\0';
+    return false;  // VERIFY: wire to the on-target localizer when available
+}
+
 int hal_tcp_recv_line(int sock, char *buf, size_t cap) {
     (void)sock;
     if (!g_sock_open || cap == 0) return -1;

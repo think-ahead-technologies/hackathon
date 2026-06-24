@@ -7,9 +7,13 @@ from datetime import datetime
 import pytest
 
 from main import (
+    build_capture_add,
+    build_capture_stop,
+    capture_cmd_subject,
     deploy_subject,
     label_subject,
     next_model_version,
+    parse_capture,
     parse_deploy,
     parse_inference,
     parse_label,
@@ -112,3 +116,30 @@ def test_should_queue_retrain(new_labels, threshold, expected):
 def test_next_model_version_increments():
     assert next_model_version(0) == "pdm-anomaly@retrained-1"
     assert next_model_version(2) == "pdm-anomaly@retrained-3"
+
+
+def test_capture_cmd_subject_shape():
+    assert capture_cmd_subject("line1", "cnc-7") == "capture.line1.cnc-7.cmd"
+
+
+def test_build_capture_add_carries_fields():
+    cmd = build_capture_add("seg-4", "bearing wear", "cap-1")
+    assert cmd == {"request_id": "cap-1", "label": "bearing wear", "segment": "seg-4"}
+
+
+def test_build_capture_stop_shape():
+    assert build_capture_stop() == {"stop": True}
+
+
+def test_parse_capture_accepts_window():
+    msg = parse_capture(
+        json.dumps({"request_id": "cap-1", "label": "healthy", "segment": "seg-4",
+                    "seq": 3, "features_b64": "AAA="}).encode()
+    )
+    assert msg["seq"] == 3
+    assert msg["features_b64"] == "AAA="
+
+
+def test_parse_capture_rejects_missing_features():
+    with pytest.raises(ValueError):
+        parse_capture(json.dumps({"request_id": "cap-1", "seq": 0}).encode())

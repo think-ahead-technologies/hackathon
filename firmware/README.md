@@ -21,6 +21,7 @@ off-target.
 | Power-fail-atomic metadata (2-copy + seq + CRC32) | `src/meta_store.c` | ✅ real + unit-tested |
 | Contract A manifest parsing (fixed-schema JSON) | `src/manifest.c` | ✅ real + unit-tested |
 | Contract C framing + chunked-flatbuffer reassembly | `src/deploy.c` | ✅ real + unit-tested |
+| Contract E capture command parse + session counter | `src/capture.c` | ✅ real + unit-tested |
 | Hardware seam (interface) | `include/platform_hal.h` | ✅ stable interface the logic depends on |
 | Hardware seam (PSE84 impl) | `src/platform_hal_pse84.c` | ⚠️ **researched scaffold, unverified** — real MTB/PSA/WCM APIs, confirm signatures on-target |
 | TFLM interpreter lifecycle | `src/model_loader.cc` | 🔶 real TFLM API, on-target build only |
@@ -93,6 +94,34 @@ The same NATS socket carries Contract B (inference results) out and Contract C (
 Subjects match the dashboard: the device publishes to `edge.line1.cnc-7` so it crosses the
 **Vector** boundary gateway, exactly like `fakegen` and the serial shim. See
 `dashboard/docs/device-nats.md` for the wire-protocol crib.
+
+### Contract E — directed data gathering
+
+The platform tells the device which **track segments** to record, so the training set isn't
+skewed toward whatever failure data happens to accumulate. Two uses: gather a **clean baseline**
+(`label: "healthy"`), and gather a **failure segment** when an operator annotates a part bad
+(auto-fired by the bridge's `POST /annotate`; also `POST /capture`).
+
+| Subject | Direction | Payload |
+|---|---|---|
+| `capture.<line>.<container>.cmd`  | device **subscribes** | add: `{request_id, label, segment}` · stop: `{stop:true}` |
+| `capture.<line>.<container>.data` | device **publishes**  | `{request_id, label, segment, seq, container_id, data_classification:"capture", features_b64}` |
+
+The device keeps a **watch-set** of segments. Commands arrive **one at a time** and accumulate:
+each add command puts a `segment` (with its label) into the set; the device records every window
+while it is driving on **any** watched segment, stamping the window with that segment's label.
+A `{"stop": true}` command **clears the whole set** — stop listening. Re-adding a segment just
+refreshes its label; the set holds up to `CAPTURE_MAX_SEGMENTS` (8).
+
+The current segment comes from `hal_track_segment()` — a HAL seam (the on-device counterpart of
+the figure-8 localizer in `wear_detector/localize.py`). It is **STUB today**; until it reports a
+segment the watch-set never matches and nothing is recorded. The firmware assumes the device
+knows the segment it is currently on.
+
+The `.data` sink is deliberately **off** `edge.>` — the Vector boundary blocks raw/features
+there; operator-gated training capture is the sanctioned exception on its own subject. The
+bridge collector persists the sink to the `captures` table. Command parsing + the watch-set are
+pure and host-tested in `src/capture.c` / `test/test_capture.c`.
 
 ## What's still on the embedded team
 

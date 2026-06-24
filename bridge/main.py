@@ -29,6 +29,8 @@ HTTP_PORT = int(os.environ.get("HTTP_PORT", "8000"))
 STREAM_NAME = os.environ.get("STREAM_NAME", "EDGE")
 # Queue a retrain once this many actionable (non-dismiss) labels accumulate.
 RETRAIN_AFTER_LABELS = int(os.environ.get("RETRAIN_AFTER_LABELS", "1"))
+# The device that traverses the track and runs capture; capture commands target its subject.
+CAPTURE_DEVICE = os.environ.get("CAPTURE_DEVICE", "cnc-7")
 
 VALID_LABELS = {"bearing wear", "imbalance", "dismiss"}
 
@@ -84,6 +86,29 @@ def label_subject(line: str, container: str) -> str:
 def deploy_subject(line: str) -> str:
     """Contract C subject for a model deploy event."""
     return f"models.{line}.deploy"
+
+
+def capture_cmd_subject(line: str, container: str) -> str:
+    """Contract E subject the device subscribes to for a directed-gather command."""
+    return f"capture.{line}.{container}.cmd"
+
+
+def build_capture_add(segment: str, label: str, request_id) -> dict:
+    """Assemble a Contract E add command: watch `segment`, record while the device is on it."""
+    return {"request_id": request_id, "label": label, "segment": segment}
+
+
+def build_capture_stop() -> dict:
+    """Assemble a Contract E stop command: the device clears its watch-set (stops listening)."""
+    return {"stop": True}
+
+
+def parse_capture(data: bytes) -> dict:
+    """Validate a captured-window payload from the sink; raise ValueError if malformed."""
+    msg = json.loads(data)
+    if "features_b64" not in msg:
+        raise ValueError("capture payload missing features_b64")
+    return msg
 
 
 def parse_deploy(data: bytes) -> dict:
@@ -186,6 +211,17 @@ async def handle_deploy(pool: asyncpg.Pool, msg: dict) -> None:
         print(f"[deploy] {msg['model_version']} deployed", flush=True)
 
 
+async def handle_capture(pool: asyncpg.Pool, msg: dict) -> None:
+    """Persist one gathered window from the capture sink into the training-data store."""
+    async with pool.acquire() as con:
+        await con.execute(
+            "INSERT INTO captures (request_id, container_id, label, segment, seq, features_b64)"
+            " VALUES ($1, $2, $3, $4, $5, $6)",
+            msg.get("request_id"), msg.get("container_id"), msg.get("label"),
+            msg.get("segment"), msg.get("seq"), msg["features_b64"],
+        )
+
+
 # --- HTTP (label-ui -> NATS, and Prometheus /metrics) ---------------------
 
 async def post_label(request: web.Request) -> web.Response:
@@ -247,6 +283,34 @@ async def post_control(request: web.Request) -> web.Response:
         return web.json_response({"error": "cmd must be auto|perturb|heal"}, status=400)
     await request.app["nc"].publish(f"control.{line}", json.dumps({"cmd": cmd}).encode())
     return web.json_response({"ok": True, "cmd": cmd})
+
+
+async def post_capture(request: web.Request) -> web.Response:
+    """Tell the device which track segments to record (Contract E).
+
+    Segments are sent one at a time and accumulate into the device's watch-set; it records every
+    window while driving on any watched segment. Use `label: "healthy"` to gather clean baseline
+    data (so the training set isn't skewed toward failure data) or a fault class for a bad part.
+    Send `{"stop": true}` to clear the watch-set and stop listening. Published on
+    capture.<line>.<container>.cmd (container defaults to the track device).
+    """
+    body = await request.json() if request.can_read_body else {}
+    line = body.get("line", "line1")
+    container = body.get("container_id", CAPTURE_DEVICE)
+    subject = capture_cmd_subject(line, container)
+    nc = request.app["nc"]
+
+    if body.get("stop"):
+        await nc.publish(subject, json.dumps(build_capture_stop()).encode())
+        return web.json_response({"ok": True, "subject": subject, "stop": True})
+
+    segment = body.get("segment")
+    if not segment:
+        return web.json_response({"error": "segment required (or send stop:true)"}, status=400)
+    label = body.get("label", "healthy")
+    request_id = body.get("request_id") or f"cap-{segment}"
+    await nc.publish(subject, json.dumps(build_capture_add(segment, label, request_id)).encode())
+    return web.json_response({"ok": True, "subject": subject, "segment": segment})
 
 
 async def get_model_events(request: web.Request) -> web.Response:
@@ -362,8 +426,19 @@ async def post_annotate(request: web.Request) -> web.Response:
         "label": fault,
     }
     subject = label_subject(line, location)
-    await request.app["nc"].publish(subject, json.dumps(payload).encode())
-    return web.json_response({"ok": True, "subject": subject})
+    nc = request.app["nc"]
+    await nc.publish(subject, json.dumps(payload).encode())
+
+    # Close the data loop: marking a segment faulty also adds it to the track device's capture
+    # watch-set (Contract E), so retraining gets the windows from that segment, not just the
+    # label. The device records whenever it drives on it, until a stop command. 'dismiss' is no fault.
+    capture_subject = None
+    if fault != "dismiss":
+        container = body.get("container_id", CAPTURE_DEVICE)
+        capture_subject = capture_cmd_subject(line, container)
+        cmd = build_capture_add(location, fault, f"cap-annotate-{location}")
+        await nc.publish(capture_subject, json.dumps(cmd).encode())
+    return web.json_response({"ok": True, "subject": subject, "capture_subject": capture_subject})
 
 
 async def metrics(request: web.Request) -> web.Response:
@@ -489,9 +564,17 @@ async def main() -> None:
             print(f"[deploy] dropped: {exc}", flush=True)
         await m.ack()
 
+    async def on_capture(m):
+        try:
+            await handle_capture(pool, parse_capture(m.data))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[capture] dropped: {exc}", flush=True)
+
     await js.subscribe("inference.>", durable="bridge-inference", cb=on_inference)
     await js.subscribe("labels.>", durable="bridge-labels", cb=on_label)
     await js.subscribe("models.>", durable="bridge-models", cb=on_deploy)
+    # Capture sink: core NATS (not JetStream) — high-volume training windows outside the EDGE stream.
+    await nc.subscribe("capture.*.*.data", cb=on_capture)
     print(f"[bridge] subscribed; THRESHOLD={THRESHOLD}", flush=True)
 
     app = web.Application(middlewares=[cors_middleware])
@@ -500,6 +583,7 @@ async def main() -> None:
     app.router.add_post("/label", post_label)
     app.router.add_post("/deploy", post_deploy)
     app.router.add_post("/control", post_control)
+    app.router.add_post("/capture", post_capture)
     app.router.add_post("/annotate", post_annotate)
     app.router.add_get("/alerts", get_alerts)
     app.router.add_get("/track", get_track)

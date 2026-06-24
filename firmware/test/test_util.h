@@ -36,5 +36,6 @@ void run_nats_proto_tests(void);
 void run_meta_store_tests(void);
 void run_manifest_tests(void);
 void run_deploy_tests(void);
+void run_capture_tests(void);
 
 #endif  // TEST_UTIL_H
