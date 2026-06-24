@@ -1,0 +1,47 @@
+# ABOUTME: Host build of the vendor-neutral firmware logic + its unit tests (no board needed).
+# ABOUTME: The TFLM/Ethos-U/SMIF integration (model_loader.cc, device_main.c) is built on-target only.
+
+CC      ?= cc
+CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -Iinclude
+BUILD   := build
+
+# Pure, host-testable logic — no hardware, no TFLM.
+LOGIC_SRC := src/model_slot.c src/model_contract.c src/shadow.c src/nats_proto.c \
+             src/meta_store.c src/manifest.c src/deploy.c
+TEST_SRC  := test/test_runner.c test/test_model_slot.c test/test_model_contract.c \
+             test/test_shadow.c test/test_nats_proto.c test/test_meta_store.c \
+             test/test_manifest.c test/test_deploy.c
+
+.DEFAULT_GOAL := test
+
+## test: build and run the host-side unit tests for the vendor-neutral logic
+.PHONY: test
+test: $(BUILD)/tests
+	./$(BUILD)/tests
+
+$(BUILD)/tests: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
+	$(CC) $(CFLAGS) -Itest $(LOGIC_SRC) $(TEST_SRC) -o $@
+
+## crosslang: prove deploy_frame.py output parses byte-identically through the C deploy/manifest code
+.PHONY: crosslang
+crosslang: $(BUILD)/harness_deploy
+	python3 test/crosslang_test.py ./$(BUILD)/harness_deploy
+
+$(BUILD)/harness_deploy: src/deploy.c src/manifest.c test/harness_deploy.c | $(BUILD)
+	$(CC) $(CFLAGS) src/deploy.c src/manifest.c test/harness_deploy.c -o $@
+
+## nats-login: drive our real nats_proto auth code through a live login against a throwaway nats-server
+.PHONY: nats-login
+nats-login: $(BUILD)/harness_nats_login
+	python3 test/nats_login_test.py ./$(BUILD)/harness_nats_login
+
+$(BUILD)/harness_nats_login: src/nats_proto.c test/harness_nats_login.c | $(BUILD)
+	$(CC) $(CFLAGS) src/nats_proto.c test/harness_nats_login.c -o $@
+
+$(BUILD):
+	mkdir -p $(BUILD)
+
+## clean: remove build artifacts
+.PHONY: clean
+clean:
+	rm -rf $(BUILD)

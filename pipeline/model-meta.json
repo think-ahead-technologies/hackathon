@@ -1,8 +1,54 @@
 {
-  "_comment": "The model contract ML hands over (Contract A). package.py merges this with the computed version, sha256, and flatbuffer size into the signed manifest the firmware validates on load.",
+  "_comment": "Contract A for the on-device wear model. Anomaly detector: the int8 encoder maps a [1,49,40,1] spectrogram to a [1,K] embedding; the device scores L2 distance to the per-unit healthy centroid, dwell-smooths it, and alerts over threshold. Detects unknown faults (healthy-only training). package.py merges version/sha256/size into the signed manifest.",
   "model_id": "pdm-anomaly",
   "target": "pse84/ethos-u55-128",
-  "input":  {"shape": [1, 49, 40, 1], "dtype": "int8", "scale": 0.018, "zero_point": -12},
-  "output": {"shape": [1, 2], "dtype": "int8", "scale": 0.004, "zero_point": 0},
-  "arena_bytes": 524288
+  "input": {
+    "shape": [
+      1,
+      49,
+      40,
+      1
+    ],
+    "dtype": "int8",
+    "scale": 0.025814762338995934,
+    "zero_point": -128
+  },
+  "output": {
+    "shape": [
+      1,
+      8
+    ],
+    "dtype": "int8",
+    "scale": 0.2020280361175537,
+    "zero_point": -9
+  },
+  "arena_bytes": 131072,
+  "feature_config": {
+    "window_s": 4.0,
+    "fs": 50.0,
+    "n_fft": 16,
+    "hop": 3,
+    "n_frames": 49,
+    "n_bands": 40,
+    "fb": "linear-tri",
+    "log": "log1p(power/scale_eps)",
+    "scale_eps": 0.001
+  },
+  "embedding": {
+    "score": "l2_to_centroid",
+    "dim": 8,
+    "centroid": [
+      0.3362806439399719,
+      -2.1457066535949707,
+      -4.9178876876831055,
+      2.8203508853912354,
+      2.295799970626831,
+      2.9266891479492188,
+      1.4891117811203003,
+      2.701542854309082
+    ],
+    "threshold": 21.413436889648438,
+    "dwell_w": 3,
+    "fpr_target": 0.05
+  }
 }
