@@ -23,7 +23,7 @@
 // NATS_HOST/NATS_PORT are build-overridable (e.g. `make build NATS_HOST=10.0.0.5`); the
 // default is the edge-node demo broker. Host may be a dotted-quad (LAN) or a DNS name (cloud).
 #ifndef NATS_HOST
-#define NATS_HOST   "192.168.1.50"
+#define NATS_HOST   "wallnats.ganter.dev"
 #endif
 #ifndef NATS_PORT
 #define NATS_PORT   4222
