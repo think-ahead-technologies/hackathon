@@ -120,6 +120,36 @@ async def publish_one(nc, container: str, base: float, elapsed: float) -> None:
             })
 
 
+# Conveyor track segments (match label-ui/track.html topology). The video localizer
+# would stamp these as `location`; here fakegen plays both device and model so the
+# track view's heatmap and model fault annotations are live in the demo.
+TRACK_SEGMENTS = [f"seg-{i}" for i in range(1, 18)]
+HOT_SEGMENT = "seg-4"          # one segment the "model" flags as a bearing fault
+
+
+def track_score(seg: str, elapsed: float) -> float:
+    """Healthy baseline across the loop, with one segment riding over threshold."""
+    if seg == HOT_SEGMENT:
+        return round(0.78 + 0.03 * math.sin(elapsed), 4)
+    idx = TRACK_SEGMENTS.index(seg)
+    return round(0.18 + 0.12 * abs(math.sin(elapsed / 7.0 + idx)), 4)
+
+
+async def publish_track(nc, elapsed: float) -> None:
+    """Emit one Contract B inference per track segment (container_id == location)."""
+    for seg in TRACK_SEGMENTS:
+        score = track_score(seg, elapsed)
+        await publish_edge(nc, seg, "inference", {
+            "ts": now_iso(),
+            "container_id": seg,
+            "model_version": MODEL_VERSION,
+            "anomaly_score": score,
+            "fault_class": "bearing wear" if seg == HOT_SEGMENT else None,
+            "location": seg,
+            "bytes": INFERENCE_BYTES,
+        })
+
+
 async def on_control(msg) -> None:
     try:
         cmd = json.loads(msg.data).get("cmd", "auto")
@@ -147,6 +177,7 @@ async def main() -> None:
         # cnc-7 follows the demo control mode; press-3 is a steady healthy control.
         await publish_one(nc, "cnc-7", cnc_score(elapsed), elapsed)
         await publish_one(nc, "press-3", 0.20, elapsed)
+        await publish_track(nc, elapsed)
         elapsed += PERIOD_S
         await asyncio.sleep(PERIOD_S)
 

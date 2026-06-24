@@ -25,6 +25,12 @@
     }
     header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
     header .sub { color: #8b909c; font-size: 13px; }
+    header .nav { margin-left: auto; }
+    header .nav a {
+      color: #8b909c; text-decoration: none; font-size: 13px; font-weight: 600;
+      padding: 7px 12px; border: 1px solid #2c2f38; border-radius: 8px;
+    }
+    header .nav a:hover { color: var(--paper); border-color: #444; }
     main { padding: 24px 28px; max-width: 760px; margin: 0 auto; }
     .empty { color: #8b909c; padding: 48px 0; text-align: center; font-size: 15px; }
     .alert {
@@ -76,6 +82,7 @@
   <header>
     <h1>Edge Ops · Operator Labels</h1>
     <span class="sub">label an alert → retrain data for ML (Contract D)</span>
+    <span class="nav"><a href="track.html">Track view →</a></span>
   </header>
   <main>
     <div id="alerts"></div>
@@ -94,7 +101,7 @@
   <script>
     // Bridge base URL: same host as this page, port 8000. Override with ?bridge=...
     const params = new URLSearchParams(location.search);
-    const BRIDGE = params.get("bridge") || `http://${location.hostname}:8000`;
+    const BRIDGE = params.get("bridge") || `http://${location.hostname || "localhost"}:8000`;
     const LINE = params.get("line") || "line1";
 
     const LABELS = [
