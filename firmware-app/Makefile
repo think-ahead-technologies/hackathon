@@ -42,6 +42,20 @@ MTB_PROJECTS=proj_cm33_s proj_cm33_ns proj_cm55
 # Paths
 ################################################################################
 
+# Local convenience targets that don't need the ModusToolbox build machinery (serial console).
+# Skip the heavy application.mk include for these so `make logs` is instant and toolchain-free.
+LOCAL_GOALS := logs logs-reset
+ifeq ($(filter $(LOCAL_GOALS),$(MAKECMDGOALS)),)
 include common_app.mk
-
 include $(CY_TOOLS_DIR)/make/application.mk
+endif
+
+## logs:       stream the device debug UART (Ctrl-C to stop). Override PORT=/dev/cu.usbmodemXXXX
+.PHONY: logs
+logs:
+	@scripts/device-logs.sh
+
+## logs-reset: reset the device, then stream from the boot banner
+.PHONY: logs-reset
+logs-reset:
+	@scripts/device-logs.sh --reset
