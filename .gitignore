@@ -38,3 +38,6 @@ wear_detector/export/.venv/
 
 # stray export output dir created by wear_detector/export (vela_compile/emit_meta write here)
 dashboard/
+
+# wear detector: frames extracted from the committed zip on demand (regenerable)
+data/test1/anomaly_frames/

@@ -35,6 +35,10 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   figure-8 lap phase (laps from the gyro, §6) to ask *do the faults recur at a fixed track position?*
   Phase-locked → high spatial contrast → **track** defect; uniform → **onboard** wear. Needs ≥2
   comparable laps to argue recurrence, else the verdict is held at *inconclusive*.
+- `frames.py` — **audio↔camera correlation**: frame names carry a host-µs stamp and the IMU CSV pins
+  `host_us = 1e6·t_rel + origin`, so each acoustic anomaly maps to the nearest camera frame on one
+  shared clock. `python -m wear_detector.frames data/test1/anomaly_frames` prints the table and
+  extracts the matched frames — ground-truth on *what the machine was doing* at each anomaly.
 - `io_imu.py::load_imu_csv` — loader for the merged-recorder CSV (`data/test1/*.csv`): 100 Hz IMU in
   SI units, bursty timestamps reconstructed to a uniform timeline. `iter_windows` takes a `.csv` path
   and a `session_label` for the unlabeled recordings (e.g. tag a whole fault session `"fault"`).
