@@ -1,0 +1,91 @@
+# ABOUTME: CI — runs every test suite in the repo on pull requests and pushes to main.
+# ABOUTME: Mirrors the `make test*` targets and the firmware/wear_detector suites natively.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch/PR cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: python · ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # bridge pulls asyncpg, which only ships wheels for the project's target (3.12).
+        component: [bridge, pipeline, serial-shim]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        working-directory: ${{ matrix.component }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Run tests
+        working-directory: ${{ matrix.component }}
+        run: python -m pytest -q
+
+  wear-detector:
+    name: wear_detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy pytest
+      # test_dataset.py needs the IMU recordings (not committed); the TF tests
+      # self-skip via importorskip; one vela test reads a sibling-layout path.
+      - name: Run tests
+        run: |
+          python -m pytest -q wear_detector/tests \
+            --ignore=wear_detector/tests/test_dataset.py \
+            --deselect "wear_detector/tests/test_vela_compile.py::test_normalized_row_satisfies_gate_schema"
+
+  firmware:
+    name: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install cryptography
+      - name: Unit tests (host logic)
+        run: make -C firmware test
+      # The cross-tests import the Platform-side framer/provisioning from pipeline/.
+      - name: Cross-language wire-format test
+        run: make -C firmware crosslang
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pipeline
+      - name: Live NATS nkey-login test
+        run: make -C firmware nats-login
+        env:
+          PYTHONPATH: ${{ github.workspace }}/pipeline
+
+  vector:
+    name: vector policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Data-minimization policy test
+        run: |
+          docker run --rm -v "$PWD/vector":/etc/vector timberio/vector:0.50.0-debian \
+            test /etc/vector/vector.yaml /etc/vector/vector.test.yaml
