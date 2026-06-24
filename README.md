@@ -1,3 +1,7 @@
+> 📌 **Project plan / who-does-what:** see [`NEXT_STEPS.md`](NEXT_STEPS.md) — the path from
+> the laptop analysis ([`analysis/`](analysis/README.md)) to on-device detection, telemetry,
+> and the feedback loop, with parallel workstreams and owners.
+
 # Edge Ops dashboard + label loop
 
 Local-first operations dashboard for the Thin[gk]athon edge-AI demo. The whole stack runs
