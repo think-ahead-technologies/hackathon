@@ -33,6 +33,29 @@ def load_imu(session_dir):
     return t, accel, gyro
 
 
+def load_merged_csv(path):
+    """Return (t_wall, accel[N,3], gyro[N,3], fs) for a merged-recorder CSV.
+
+    t_wall is the host wall clock (t_rel_s) zeroed to the first sample — the timeline
+    to align against other modalities (audio / video) recorded in the same session.
+    fs is the nominal IMU ODR recovered from the device clock (see load_imu_csv).
+    """
+    acc, gyr, t_dev_us, t_rel_s = [], [], [], []
+    with open(path) as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            acc.append([float(row[c]) for c in CSV_ACCEL_COLS])
+            gyr.append([float(row[c]) for c in CSV_GYRO_COLS])
+            t_dev_us.append(float(row["t_dev_us"]))
+            t_rel_s.append(float(row["t_rel_s"]))
+    accel = np.asarray(acc, dtype=np.float64)
+    gyro = np.asarray(gyr, dtype=np.float64)
+    fs = _nominal_fs_from_dev_clock(np.asarray(t_dev_us, dtype=np.float64))
+    t_rel = np.asarray(t_rel_s, dtype=np.float64)
+    t_wall = t_rel - t_rel[0]
+    return t_wall, accel, gyro, fs
+
+
 def load_imu_csv(path):
     """Return (t, accel[N,3], gyro[N,3]) for a merged-recorder CSV.
 
@@ -41,17 +64,9 @@ def load_imu_csv(path):
     monotonic timeline on its own. We recover the sensor's nominal ODR from the
     dominant positive t_dev_us step and hand back a uniform time vector — that is the
     only timing the spectral feature path needs, and it keeps infer_fs() exact.
+    Use load_merged_csv when you need the real wall clock for cross-modal alignment.
     """
-    acc, gyr, t_dev_us = [], [], []
-    with open(path) as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            acc.append([float(row[c]) for c in CSV_ACCEL_COLS])
-            gyr.append([float(row[c]) for c in CSV_GYRO_COLS])
-            t_dev_us.append(float(row["t_dev_us"]))
-    accel = np.asarray(acc, dtype=np.float64)
-    gyro = np.asarray(gyr, dtype=np.float64)
-    fs = _nominal_fs_from_dev_clock(np.asarray(t_dev_us, dtype=np.float64))
+    _t_wall, accel, gyro, fs = load_merged_csv(path)
     t = np.arange(len(accel), dtype=np.float64) / fs
     return t, accel, gyro
 

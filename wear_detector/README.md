@@ -31,6 +31,10 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   nominal run is its own baseline and the built-in track errors surface as the high-energy minority.
 - `audio_eval.py` — runs the acoustic scan on a recording and clusters the flagged windows into
   events (the track errors recur across laps): `python -m wear_detector.audio_eval data/test1/<rec>.wav`.
+- `audio_localize.py` — **audio↔lap-position correlation**: bins the acoustic anomaly score by
+  figure-8 lap phase (laps from the gyro, §6) to ask *do the faults recur at a fixed track position?*
+  Phase-locked → high spatial contrast → **track** defect; uniform → **onboard** wear. Needs ≥2
+  comparable laps to argue recurrence, else the verdict is held at *inconclusive*.
 - `io_imu.py::load_imu_csv` — loader for the merged-recorder CSV (`data/test1/*.csv`): 100 Hz IMU in
   SI units, bursty timestamps reconstructed to a uniform timeline. `iter_windows` takes a `.csv` path
   and a `session_label` for the unlabeled recordings (e.g. tag a whole fault session `"fault"`).
@@ -73,6 +77,18 @@ the IMU detector; only the front-end (band energies of the audio window) and the
 (self vs. a separate healthy unit) differ. On `data/test1` this surfaces ~9 distinct anomaly events
 across the 270 s run — candidate track-error positions. Without a healthy reference this is detection,
 not calibrated FPR; a healthy lap recording would turn the self-baseline back into a true per-unit one.
+
+### Localizing it: track defect vs. onboard wear
+
+A built-in *track* fault recurs at the same position every lap; *onboard* wear is everywhere. So
+`audio_localize.py` segments figure-8 laps from the gyro (§6, in the IMU wall clock) and bins the
+acoustic anomaly score by lap phase, sharing the recording-start origin with the audio. Phase-locked
+energy → high spatial contrast → **track**; uniform → **onboard**. The wiring is verified on synthetic,
+time-aligned IMU+audio (faults injected at a fixed lap phase resolve to `track`, contrast > 2, peak at
+the injected phase). On `data/test1` the call is **inconclusive**: the run yields only ~3 laps and the
+route varies enough that the dominant variant holds a single lap — high *within-lap* contrast, but you
+can't argue *across-lap* recurrence from one lap. A longer or less route-variable recording (≥2
+comparable laps) is what turns this into a real track-vs-onboard verdict.
 
 ## Results on the 50 Hz recordings
 
