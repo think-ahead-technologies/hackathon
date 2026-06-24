@@ -12,7 +12,7 @@ from wear_detector.emit_contract_b import fit_baseline
 from wear_detector.io_imu import infer_fs, load_imu
 
 DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "thinkathon_kickstart", "data")
+                    "data", "thinkathon_kickstart", "data")
 HEALTHY = [os.path.join(DATA, d) for d in (
     "Session-2026-06-17--11-25-33_all_normal",
     "Session-2026-06-17--11-26-26_all_normal",

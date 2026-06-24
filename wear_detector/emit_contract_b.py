@@ -114,7 +114,7 @@ def main():
     args = p.parse_args()
 
     data_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "thinkathon_kickstart", "data")
+                             "data", "thinkathon_kickstart", "data")
     healthy = [os.path.join(data_root, d) for d in (
         "Session-2026-06-17--10-46-14_normal",
         "Session-2026-06-17--11-25-33_all_normal",

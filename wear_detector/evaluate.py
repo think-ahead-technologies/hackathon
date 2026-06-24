@@ -10,7 +10,7 @@ from wear_detector import features
 from wear_detector.io_imu import iter_windows
 
 DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "thinkathon_kickstart", "data")
+                    "data", "thinkathon_kickstart", "data")
 
 HEALTHY = [
     "Session-2026-06-17--10-46-14_normal",

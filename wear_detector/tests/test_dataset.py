@@ -1,8 +1,16 @@
 # ABOUTME: Integration test for the dataset builder against the real recordings.
 # ABOUTME: Locks spectrogram shape/dtype, healthy/fault presence, and per-unit grouping.
+import os
+
 import numpy as np
+import pytest
 
 from wear_detector.export import dataset, spectro
+
+# The recordings are large and gitignored, so they're absent in CI — skip there, run locally.
+pytestmark = pytest.mark.skipif(
+    not os.path.isdir(dataset.DATA),
+    reason=f"recordings not present at {dataset.DATA} (large, gitignored)")
 
 
 def test_build_shapes_and_presence():

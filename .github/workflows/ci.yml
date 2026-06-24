@@ -49,12 +49,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy scipy pytest
-      # test_dataset.py needs the IMU recordings (not committed); the TF tests
-      # self-skip via importorskip when tensorflow is absent.
+      # test_dataset.py self-skips when the (large, gitignored) recordings are absent;
+      # the TF tests self-skip via importorskip when tensorflow is absent.
       - name: Run tests
-        run: |
-          python -m pytest -q wear_detector/tests \
-            --ignore=wear_detector/tests/test_dataset.py
+        run: python -m pytest -q wear_detector/tests
 
   firmware:
     name: firmware
