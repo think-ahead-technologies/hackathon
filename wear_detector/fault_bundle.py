@@ -50,16 +50,28 @@ def build(csv_path, wav_path, frames_src, out_dir, pre_s=1.5, post_s=1.5, gate=T
         records.append({"i": i, "t": t, "score": score, "frame_dt": dt,
                         "img": img_name, "clip": clip_name, "clip_s": secs})
 
+    # Location by camera view: faults whose frames look alike are at the same spot on the line.
+    # Optional — only if Pillow is available; absence just omits the column.
+    try:
+        from wear_detector.fault_location import locate
+        labels = locate([os.path.join(out_dir, r["img"]) for r in records])
+        for r, lab in zip(records, labels):
+            r["location"] = f"L{lab}"
+    except Exception:
+        for r in records:
+            r["location"] = "?"
+
     lines = [f"# Fault inspection bundle\n",
              f"Source: `{os.path.basename(wav_path)}`  |  {len(records)} events"
              f"{' (motion-gated)' if gate else ''}\n",
              "Each event: a camera frame at the anomaly and a "
              f"{pre_s + post_s:.0f}s audio clip centred on it.\n",
-             "| # | time (s) | acoustic score | frame Δt (s) | image | audio |",
-             "|---|---|---|---|---|---|"]
+             "`location` groups faults whose camera view matches — same label = same spot on the line.\n",
+             "| # | time (s) | acoustic score | location | frame Δt (s) | image | audio |",
+             "|---|---|---|---|---|---|---|"]
     for r in records:
-        lines.append(f"| {r['i']} | {r['t']:.1f} | {r['score']:.3f} | {r['frame_dt']:+.2f} "
-                     f"| `{r['img']}` | `{r['clip']}` |")
+        lines.append(f"| {r['i']} | {r['t']:.1f} | {r['score']:.3f} | {r.get('location','?')} "
+                     f"| {r['frame_dt']:+.2f} | `{r['img']}` | `{r['clip']}` |")
     with open(os.path.join(out_dir, "index.md"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
     return records
@@ -70,7 +82,7 @@ def main(csv_path, wav_path, frames_src, out_dir):
     print(f"bundle: {len(records)} events -> {out_dir}")
     for r in records:
         print(f"  event{r['i']:02d}  t={r['t']:6.1f}s  score={r['score']:.3f}  "
-              f"{r['img']} + {r['clip']}")
+              f"loc={r.get('location','?')}  {r['img']} + {r['clip']}")
 
 
 if __name__ == "__main__":

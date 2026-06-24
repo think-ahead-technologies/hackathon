@@ -43,6 +43,14 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   delivered as a few contiguous capture segments (the device clock resets between them); this Welch-
   averages FFTs *within* each segment and pools across, so the spectrum never smears across a gap.
   `burst_spectral_features` shares `features.spectral_shape`'s keys — a drop-in for the spectral subset.
+- `fault_bundle.py` — **inspection bundle**: per motion-gated event, extract the camera frame + a short
+  audio clip + an `index.md` so a human can see/hear each fault. `python -m wear_detector.fault_bundle
+  <csv> <wav> <frames-zip-or-dir> <out-dir>`.
+- `fault_location.py` — **camera-based location**: cluster fault frames by visual similarity (same view
+  = same spot on the line). On test2, 4 of 5 faults cluster to one station — recurrence = a track defect
+  there. Used by `fault_bundle` to add a `location` column (needs Pillow; clustering math is dep-free).
+- `imu_band_probe.py` — quantifies whether the IMU "hears" the fault (>400 Hz energy at events vs
+  baseline; AUC ~0.8 on test2). The high-band signature exists only at >=1600 Hz.
 - `motion_gate.py` — **motion gate**: only assess wear while the unit is actually moving. The carrier
   rotates through the line under power (tens of dps of yaw) while a parked or hand-held unit sits near
   zero, so gating each anomaly on the gyro energy at its peak instant drops handling/parked artifacts.
