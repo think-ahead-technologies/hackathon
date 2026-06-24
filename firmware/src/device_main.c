@@ -209,7 +209,11 @@ static void evaluate_shadow(float active_score, float candidate_score) {
     g_shadowing = false;
 }
 
-int main(void) {
+// Entry point for the device orchestration loop. On a bare-metal host this is the
+// program; under ModusToolbox the board main() (proj_cm33_ns) brings up the BSP and
+// runs this as a FreeRTOS task (see firmware-app/). It only returns on a fatal init
+// failure — the steady state is the infinite publish/deploy loop below.
+int device_main(void) {
     if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
     if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
 

@@ -32,24 +32,14 @@
 
 // ---- BSP / middleware headers (present only in the on-target MTB build) -----
 #include "cybsp.h"
+#ifndef HAL_FLASH_STUB
 #include "cy_serial_flash_qspi.h"   // SMIF serial-flash middleware
+#endif
 #include "psa/crypto.h"             // PSA Crypto (Mbed TLS / TF-M backed)
 #include "cy_wcm.h"                 // Wi-Fi Connection Manager
 #include "cy_wcm_error.h"
 #include "cy_secure_sockets.h"      // Secure Sockets (over lwIP); TLS unless -DNATS_DISABLE_TLS
 #include "mtb_hal.h"                // mtb_hal_sdio_t / mtb_hal_gpio_t used by WCM bring-up
-
-// =============================================================================
-//  Flash layout — these offsets come from your flash plan / linker, NOT guesses.
-//  VERIFY: set to the actual reserved regions in the QSPI Configurator / .ld.
-// =============================================================================
-// Two metadata copies for power-fail-atomic updates (see meta_store). VERIFY: two distinct
-// reserved sectors in the QSPI Configurator / .ld.
-#define META_FLASH_OFFSET_A (0x00100000u)
-#define META_FLASH_OFFSET_B (0x00110000u)
-// VERIFY: the memory-mapped base the SMIF exposes for XIP reads on the E84.
-// On CAT1 parts this is the SMIF XIP region base (e.g. CY_XIP_BASE); confirm for E84.
-#define SMIF_XIP_BASE       (0x60000000u)
 
 // PSA persistent key id of the model-signing public key, provisioned into the
 // device's protected storage (RRAM-backed) at manufacturing. VERIFY: the id you
@@ -63,7 +53,54 @@
 //  QSPI NOR flash (SMIF serial-flash middleware)
 //  init is expected to have run at boot: cy_serial_flash_qspi_init(...). The
 //  config struct comes from the QSPI Configurator (cycfg_qspi_memslot.h).
+//
+//  HAL_FLASH_STUB: the connectivity-first firmware-app build defines this to get a
+//  no-persistence backend — model slots aren't wired to QSPI yet (E84 serial-flash
+//  bring-up is pending; serial-flash v1.4.3 is the legacy cyhal/CAT1A API). With the
+//  stub, hal_flash_* fail benignly so an inbound Contract C deploy aborts cleanly
+//  instead of corrupting anything, while the Wi-Fi/TLS/NATS publish path runs for real.
 // -----------------------------------------------------------------------------
+#ifdef HAL_FLASH_STUB
+
+bool hal_flash_erase(uint32_t offset, uint32_t len) {
+    (void)offset; (void)len;
+    return false;  // no flash on the connectivity build -> deploy aborts gracefully
+}
+bool hal_flash_program(uint32_t offset, const uint8_t *data, uint32_t len) {
+    (void)offset; (void)data; (void)len;
+    return false;
+}
+const uint8_t *hal_flash_xip_map(uint32_t offset) {
+    (void)offset;
+    return NULL;
+}
+bool hal_meta_read(model_meta_t *out) {
+    // Synthesize a minimal valid metadata view: slot A active, nothing else valid.
+    // Lets model_loader_load_active(SLOT_A) and slot_inactive() behave on-target.
+    memset(out, 0, sizeof(*out));
+    out->active = SLOT_A;
+    out->slot[SLOT_A].flash_offset = 0x00000000u;
+    out->slot[SLOT_B].flash_offset = 0x00080000u;
+    return true;
+}
+bool hal_meta_write(const model_meta_t *m) {
+    (void)m;
+    return true;  // accepted but not persisted
+}
+
+#else  // real QSPI-backed flash + power-fail-atomic metadata
+
+// =============================================================================
+//  Flash layout — these offsets come from your flash plan / linker, NOT guesses.
+//  VERIFY: set to the actual reserved regions in the QSPI Configurator / .ld.
+// =============================================================================
+// Two metadata copies for power-fail-atomic updates (see meta_store). VERIFY: two distinct
+// reserved sectors in the QSPI Configurator / .ld.
+#define META_FLASH_OFFSET_A (0x00100000u)
+#define META_FLASH_OFFSET_B (0x00110000u)
+// VERIFY: the memory-mapped base the SMIF exposes for XIP reads on the E84.
+// On CAT1 parts this is the SMIF XIP region base (e.g. CY_XIP_BASE); confirm for E84.
+#define SMIF_XIP_BASE       (0x60000000u)
 
 bool hal_flash_erase(uint32_t offset, uint32_t len) {
     // VERIFY: erase granularity — must be sector-aligned; the middleware erases
@@ -127,6 +164,8 @@ bool hal_meta_write(const model_meta_t *m) {
     return cy_serial_flash_qspi_write(off, sizeof(blob), (const uint8_t *)&blob)
            == CY_RSLT_SUCCESS;
 }
+
+#endif  // HAL_FLASH_STUB
 
 // -----------------------------------------------------------------------------
 //  Secure enclave / RRAM root-of-trust (PSA Crypto, TF-M / Mbed TLS backed)
@@ -293,12 +332,21 @@ bool hal_net_init(void) {
     connect_param.ap_credentials.security = WIFI_SECURITY_TYPE;
 
     cy_wcm_ip_address_t ip_addr;
+    bool associated = false;
     for (uint32_t attempt = 0; attempt < WIFI_MAX_RETRY; attempt++) {
         if (cy_wcm_connect_ap(&connect_param, &ip_addr) == CY_RSLT_SUCCESS) {
-            return true;   // associated + DHCP lease in hand
+            associated = true;   // associated + DHCP lease in hand
+            break;
         }
     }
-    return false;          // no link after all retries — caller must not open sockets
+    if (!associated) {
+        return false;      // no link after all retries — caller must not open sockets
+    }
+
+    // Bring up the secure-sockets layer once the interface is up. The raw cy_socket_*
+    // API (used by hal_tcp_*) requires this; the example reached it via the http-client
+    // wrapper, which called it internally.
+    return cy_socket_init() == CY_RSLT_SUCCESS;
 }
 
 // -----------------------------------------------------------------------------
