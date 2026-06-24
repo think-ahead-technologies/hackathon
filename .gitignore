@@ -41,3 +41,6 @@ dashboard/
 
 # wear detector: frames extracted from the committed zip on demand (regenerable)
 data/test1/anomaly_frames/
+
+# wear detector: derived fault inspection bundles (regenerate with fault_bundle.py)
+data/fault_bundles/
