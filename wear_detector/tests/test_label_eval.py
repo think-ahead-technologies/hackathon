@@ -36,6 +36,11 @@ def test_clip_features_has_expected_keys(tmp_path):
         assert k in f
 
 
+def test_ranks_basic_and_ties():
+    assert list(label_eval.ranks([10, 30, 20])) == [1.0, 3.0, 2.0]
+    assert list(label_eval.ranks([5, 5, 9])) == [1.5, 1.5, 3.0]   # tie averaged
+
+
 def test_evaluate_returns_auc_per_feature(tmp_path):
     wav = _wav(tmp_path / "a.wav")
     csv = tmp_path / "labels.csv"
