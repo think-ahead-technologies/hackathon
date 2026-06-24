@@ -153,3 +153,10 @@ Thumbs.db:encryptable
 ehthumbs.db
 ehthumbs_vista.db
 [Dd]esktop.ini
+
+# Local Wi-Fi credentials (never commit)
+wifi_credentials.h
+**/wifi_credentials.h
+
+# ModusToolbox / clangd tool cache
+**/.cache/

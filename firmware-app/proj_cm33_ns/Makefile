@@ -103,15 +103,23 @@ DEFINES += MQTT_DO_NOT_USE_CUSTOM_CONFIG
 
 # Connectivity-first firmware build: no QSPI flash persistence yet (E84 serial-flash
 # bring-up pending), so platform_hal_pse84.c uses its no-persistence flash backend.
-# Provide Wi-Fi credentials at build time (override on the make command line, or
-# replace with secure-storage provisioning). To bring up against a plaintext NATS
-# broker, also add NATS_DISABLE_TLS here.
 DEFINES += HAL_FLASH_STUB
-DEFINES += WIFI_SSID='"$(WIFI_SSID)"' WIFI_PASSWORD='"$(WIFI_PASSWORD)"'
 
-# Default Wi-Fi credentials (override: make build WIFI_SSID=foo WIFI_PASSWORD=bar)
-WIFI_SSID ?= MY_WIFI_SSID
-WIFI_PASSWORD ?= MY_WIFI_PASSWORD
+# Wi-Fi credentials. An SSID/password containing spaces does NOT survive a -D define
+# through make (it word-splits into broken flags), so the robust path is a local,
+# gitignored header that's force-included ahead of platform_hal_pse84.c's defaults:
+#   proj_cm33_ns/wifi_credentials.h:
+#     #define WIFI_SSID     "My Network"
+#     #define WIFI_PASSWORD "secret"
+# If that header is absent, space-free creds may instead be passed on the command line:
+#   make build WIFI_SSID=foo WIFI_PASSWORD=bar
+# With neither, platform_hal_pse84.c's "MY_WIFI_SSID"/... defaults apply.
+WIFI_CREDS_HEADER := $(wildcard wifi_credentials.h)
+ifneq ($(WIFI_CREDS_HEADER),)
+CFLAGS += -include $(abspath wifi_credentials.h)
+else ifneq ($(WIFI_SSID),)
+DEFINES += WIFI_SSID='"$(WIFI_SSID)"' WIFI_PASSWORD='"$(WIFI_PASSWORD)"'
+endif
 
 # Select softfp or hardfp floating point. Default is softfp.
 VFP_SELECT+=

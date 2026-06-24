@@ -15,8 +15,8 @@ backup_dir="$APP_DIR/backups/$ts"
 scripts/device-backup.sh "$backup_dir"
 
 # Refuse to flash if the backup looks empty (board not connected / readback failed).
-if ! ls "$backup_dir"/region_*.bin >/dev/null 2>&1; then
-  echo "ERROR: backup produced no region files — aborting flash." >&2
+if ! ls "$backup_dir"/*.hex >/dev/null 2>&1; then
+  echo "ERROR: backup produced no region HEX files — aborting flash." >&2
   exit 1
 fi
 echo "Backup OK in $backup_dir (restore with: scripts/device-restore.sh '$backup_dir')"

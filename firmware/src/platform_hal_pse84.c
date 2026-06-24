@@ -40,6 +40,7 @@
 #include "cy_wcm_error.h"
 #include "cy_secure_sockets.h"      // Secure Sockets (over lwIP); TLS unless -DNATS_DISABLE_TLS
 #include "mtb_hal.h"                // mtb_hal_sdio_t / mtb_hal_gpio_t used by WCM bring-up
+#include "lwip/ip_addr.h"           // ip4addr_ntoa() for logging the assigned IP
 
 // PSA persistent key id of the model-signing public key, provisioned into the
 // device's protected storage (RRAM-backed) at manufacturing. VERIFY: the id you
@@ -333,13 +334,22 @@ bool hal_net_init(void) {
 
     cy_wcm_ip_address_t ip_addr;
     bool associated = false;
+    printf("[wifi] joining SSID '%s'...\n", WIFI_SSID);
     for (uint32_t attempt = 0; attempt < WIFI_MAX_RETRY; attempt++) {
         if (cy_wcm_connect_ap(&connect_param, &ip_addr) == CY_RSLT_SUCCESS) {
             associated = true;   // associated + DHCP lease in hand
+            if (ip_addr.version == CY_WCM_IP_VER_V4) {
+                printf("[wifi] joined '%s', IP %s\n", WIFI_SSID,
+                       ip4addr_ntoa((const ip4_addr_t *)&ip_addr.ip.v4));
+            } else {
+                printf("[wifi] joined '%s' (IPv6)\n", WIFI_SSID);
+            }
             break;
         }
+        printf("[wifi] attempt %lu failed, retrying...\n", (unsigned long)(attempt + 1));
     }
     if (!associated) {
+        printf("[wifi] FAILED to join '%s' after %u attempts\n", WIFI_SSID, WIFI_MAX_RETRY);
         return false;      // no link after all retries — caller must not open sockets
     }
 
