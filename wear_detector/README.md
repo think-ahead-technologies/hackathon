@@ -43,6 +43,10 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   delivered as a few contiguous capture segments (the device clock resets between them); this Welch-
   averages FFTs *within* each segment and pools across, so the spectrum never smears across a gap.
   `burst_spectral_features` shares `features.spectral_shape`'s keys — a drop-in for the spectral subset.
+- `tonal.py` — **tonal/squeal detector**: high-pitched narrowband faults (squeals/whines) the broadband
+  energy detector misses by construction (it averages over bands; the self-baseline absorbs frequent
+  tones). Scores high-band peak-to-median ratio — near baseline-free, since a sharp spectral peak is
+  intrinsically abnormal. On test1/test2 it finds ~45–49 squeals (~1.5 kHz) the energy detector never saw.
 - `fault_bundle.py` — **inspection bundle**: per motion-gated event, extract the camera frame + a short
   audio clip + an `index.md` so a human can see/hear each fault. `python -m wear_detector.fault_bundle
   <csv> <wav> <frames-zip-or-dir> <out-dir>`.
