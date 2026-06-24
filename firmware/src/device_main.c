@@ -20,7 +20,7 @@
 #include "shadow.h"
 
 // ---- demo configuration -----------------------------------------------------
-#define NATS_HOST   "192.168.1.50"   // the edge-node laptop running NATS
+#define NATS_HOST   "192.168.1.50"   // edge-node NATS; may also be a cloud hostname (DNS-resolved)
 #define NATS_PORT   4222
 #define LINE        "line1"
 #define CONTAINER   "cnc-7"
@@ -210,6 +210,7 @@ static void evaluate_shadow(float active_score, float candidate_score) {
 }
 
 int main(void) {
+    if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
     if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
 
     int sock = hal_tcp_connect(NATS_HOST, NATS_PORT);
