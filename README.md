@@ -191,8 +191,26 @@ Notes:
 - `promote` is a true reconcile loop: it compares the Git desired version to the **deployed** version in
   our system of record (`model_events`) and **refuses to deploy unless `cosign verify` passes** on the
   registry artifact — the supply-chain gate before a model can reach a device.
-- **Out of scope here:** model training/quantize (ML), real Vela compile (needs ML's `.tflite`), and the
-  flash-resident A/B model swap (Embedded/firmware) — see Part 2 of `model-pipeline.md`.
+- **Upstream of the gate** lives in [`wear_detector/`](wear_detector/) — the ML training/quantize/Vela
+  path that produces the real int8 `.tflite` + Contract A this pipeline consumes (see below). The
+  **flash-resident A/B model swap** on the device lives in [`firmware/`](firmware/).
+
+### The model, end to end (ML → pipeline → device)
+
+The dashboard pipeline above is the **middle** of a three-stage spine; the two ends are now in-repo:
+
+- **[`wear_detector/`](wear_detector/)** — the ML. A per-device, healthy-only IMU anomaly detector
+  (multi-feature statistical reference + an int8 autoencoder-encoder for the Ethos-U55). `export/`
+  trains → quantizes → Vela-compiles and emits `pipeline/model-meta.json` (**Contract A**), the artifact
+  the gate consumes. So "the gate runs on a committed sample CSV" above becomes the gate running on the
+  **real** Vela output. Detects unknown faults from healthy data only; full write-up in its README.
+- **[`firmware/`](firmware/)** — the device side (PSE84). Part 2 of `model-pipeline.md`: A/B flash-slot
+  promote/rollback, manifest + signature verification, shadow/rollback, and the NATS client (Contract B
+  out, Contract C in). The vendor-neutral decision logic is real and host-tested (`make test` →
+  130 checks); the hardware seam (`platform_hal.h`) is a documented scaffold to fill against the BSP.
+
+So a label click no longer just annotates a panel — it pulls on a real chain: retrain in
+`wear_detector`, gate/sign/promote in `pipeline`, and an A/B model swap (not a reflash) in `firmware`.
 
 ## Device identity + encrypted fabric / NATS auth (CRA secure-by-default)
 
