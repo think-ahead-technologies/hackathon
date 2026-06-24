@@ -45,6 +45,13 @@ MTB_PROJECTS=proj_cm33_s proj_cm33_ns proj_cm55
 # Number of parallel build jobs (override with `make firmware JOBS=4`).
 JOBS ?= 8
 
+# Convenience build flags for `make firmware` / `make flash` (forwarded to the real build):
+#   RELEASE=1 -> size-optimized Release build (-Os, ~10% smaller); default is Debug.
+#   NO_TLS=1  -> plaintext NATS connection (no TLS handshake) for the PoC / open brokers.
+# Any native MTB var (WIFI_SSID=, NATS_HOST=, NATS_PORT=, CONFIG=) still passes straight through.
+FWFLAGS := $(if $(filter 1,$(RELEASE)),CONFIG=Release,) \
+           $(if $(filter 1,$(NO_TLS)),NATS_DISABLE_TLS=1,)
+
 # Local convenience targets that don't need the ModusToolbox build machinery (serial console,
 # flashing via scripts, help). Skip the heavy application.mk include for these so they're instant
 # and toolchain-free. `firmware` is intentionally NOT local: it recurses into the real build.
@@ -55,20 +62,22 @@ include $(CY_TOOLS_DIR)/make/application.mk
 endif
 
 ## firmware:   one-shot full build of all 3 cores -> build/app_combined.hex.
-##             Resolves middleware on first run; passes WIFI_SSID=.. NATS_HOST=.. etc. straight
-##             through (e.g. `make firmware WIFI_SSID=net WIFI_PASSWORD=pw NATS_HOST=10.0.0.5`).
+##             Flags: RELEASE=1 (size-optimized -Os), NO_TLS=1 (plaintext NATS). Also passes
+##             WIFI_SSID=.. NATS_HOST=.. etc. straight through.
+##             e.g. `make firmware RELEASE=1 NO_TLS=1 WIFI_SSID=net WIFI_PASSWORD=pw`
 .PHONY: firmware
 firmware:
 	@if [ ! -f proj_cm33_ns/libs/mtb.mk ]; then \
 	  echo "==> First build: resolving middleware (make getlibs)…"; \
 	  $(MAKE) getlibs; \
 	fi
-	@$(MAKE) build -j$(JOBS)
+	@$(MAKE) build -j$(JOBS) $(FWFLAGS)
 
-## flash:      back up the device, then program the last build (scripts/device-flash.sh)
+## flash:      back up the device, then build+program it. Same flags as firmware
+##             (e.g. `make flash RELEASE=1 NO_TLS=1`).
 .PHONY: flash
 flash:
-	@scripts/device-flash.sh
+	@scripts/device-flash.sh $(FWFLAGS)
 
 ## logs:       stream the device debug UART (Ctrl-C to stop). Override PORT=/dev/cu.usbmodemXXXX
 .PHONY: logs
