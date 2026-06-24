@@ -107,9 +107,11 @@ DEFINES+=MBEDTLS_PSA_CRYPTO_CONFIG_FILE='"configs/ifx_psa_crypto_config.h"'
 DEFINES += HTTP_DO_NOT_USE_CUSTOM_CONFIG
 DEFINES += MQTT_DO_NOT_USE_CUSTOM_CONFIG
 
-# Connectivity-first firmware build: no QSPI flash persistence yet (E84 serial-flash
-# bring-up pending), so platform_hal_pse84.c uses its no-persistence flash backend.
-DEFINES += HAL_FLASH_STUB
+# QSPI-backed model slots: platform_hal_pse84.c uses the real SMIF serial-flash backend (A/B slots
+# + power-fail-atomic metadata). Requires the serial-flash middleware and the QSPI Configurator
+# output (cycfg_qspi_memslot.h / smifBlockConfig) in the build, and hal_flash_init() at boot.
+# To fall back to the no-persistence connectivity build (deploys abort cleanly), re-add:
+#   DEFINES += HAL_FLASH_STUB
 
 # Wi-Fi credentials. An SSID/password containing spaces does NOT survive a -D define
 # through make (it word-splits into broken flags), so the robust path is a local,

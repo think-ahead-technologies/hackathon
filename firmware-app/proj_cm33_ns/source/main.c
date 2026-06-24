@@ -18,6 +18,7 @@
 #include "cy_time.h"
 #include "psa/crypto.h"
 #include "retarget_io_init.h"
+#include "platform_hal.h"   /* hal_flash_init — QSPI bring-up for the model slots */
 
 /*******************************************************************************
 * Macros
@@ -113,6 +114,13 @@ int main(void)
 
     /* PSA Crypto backs the secure-enclave HAL (signature verify, sha256, nkey sign). */
     if (PSA_SUCCESS != psa_crypto_init())
+    {
+        handle_app_error();
+    }
+
+    /* Bring up the QSPI serial flash that holds the A/B model slots + metadata, and enable XIP so a
+     * deployed model is memory-mapped for the NPU. No-op on the connectivity (HAL_FLASH_STUB) build. */
+    if (!hal_flash_init())
     {
         handle_app_error();
     }

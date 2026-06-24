@@ -6,9 +6,15 @@
 **Status:** implemented (see the per-file status table at the end) — host-tested and on-target
 compile-pending. The vendor-neutral logic and the CM33↔CM55 control protocol are written and the
 host suite is green; nothing here has been built or run on the E84 BSP yet.
-**Prerequisite:** QSPI flash bring-up (drop `HAL_FLASH_STUB`). Without real flash there is
-nothing in a slot for CM55 to map, so deploys abort cleanly and CM55 runs its baked model; see the
-README's "What's still on the embedded team".
+**Prerequisite — QSPI flash bring-up:** now wired (logic) in `platform_hal_pse84.c`'s real backend —
+`hal_flash_init()` brings up the SMIF serial flash + enables XIP at boot, the A/B slots + two
+metadata sectors form a coherent non-overlapping map, `hal_meta_read` synthesizes an empty layout on
+a fresh device (so it boots on the baked model), metadata erases a full sector, and the
+`cm33_ns` build no longer defines `HAL_FLASH_STUB`. Still **unverified on-target**: every `VERIFY:`
+value (SMIF XIP base, flash offsets, the QSPI Configurator `smifBlockConfig`, the serial-flash init
+signature) and the fact that it builds/links against the E84 BSP with the serial-flash middleware
+present. Re-add `HAL_FLASH_STUB` for the no-persistence connectivity build. See the README's
+"What's still on the embedded team".
 
 ## Problem
 

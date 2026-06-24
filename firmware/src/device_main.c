@@ -69,7 +69,10 @@ static capture_set_t g_capture;
 
 // ---- Contract C deploy session ---------------------------------------------
 #define DEPLOY_MANIFEST_MAX 1024u
-#define MODEL_SLOT_BYTES    (1024u * 1024u)  // VERIFY: reserved per-slot flash size (>= worst case)
+// VERIFY: reserved per-slot flash size (>= worst-case flatbuffer). MUST equal the slot spacing in
+// platform_hal_pse84.c's flash layout (FLASH_SLOT_B_OFFSET - FLASH_SLOT_A_OFFSET) so a slot erase
+// covers exactly one slot and never reaches the metadata sectors that follow them.
+#define MODEL_SLOT_BYTES    (1024u * 1024u)
 
 // A deploy arrives as MANIFEST + SIG frames, then the MODEL flatbuffer streamed in chunks. We
 // buffer the small manifest + sig, validate them, then stream model chunks straight to the

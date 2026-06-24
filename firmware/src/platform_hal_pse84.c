@@ -34,6 +34,7 @@
 #include "cybsp.h"
 #ifndef HAL_FLASH_STUB
 #include "cy_serial_flash_qspi.h"   // SMIF serial-flash middleware
+#include "cycfg_qspi_memslot.h"     // QSPI Configurator block config (smifBlockConfig)
 #endif
 #include "psa/crypto.h"             // PSA Crypto (Mbed TLS / TF-M backed)
 #include "cy_wcm.h"                 // Wi-Fi Connection Manager
@@ -62,8 +63,19 @@
 //  stub, hal_flash_* fail benignly so an inbound Contract C deploy aborts cleanly
 //  instead of corrupting anything, while the Wi-Fi/TLS/NATS publish path runs for real.
 // -----------------------------------------------------------------------------
+
+// Model-slot base offsets — shared by both backends (the stub uses them for its default metadata
+// view, the real backend for the fresh-device default). The two slots must be at least
+// MODEL_SLOT_BYTES (device_main.c) apart and must not overlap the metadata sectors below.
+// VERIFY: against the QSPI Configurator / linker flash plan.
+#define FLASH_SLOT_A_OFFSET (0x00000000u)
+#define FLASH_SLOT_B_OFFSET (0x00100000u)  // 1 MB past slot A (matches MODEL_SLOT_BYTES)
+
 #ifdef HAL_FLASH_STUB
 
+bool hal_flash_init(void) {
+    return true;   // no QSPI on the connectivity build — nothing to bring up
+}
 bool hal_flash_erase(uint32_t offset, uint32_t len) {
     (void)offset; (void)len;
     return false;  // no flash on the connectivity build -> deploy aborts gracefully
@@ -81,8 +93,8 @@ bool hal_meta_read(model_meta_t *out) {
     // Lets model_loader_load_active(SLOT_A) and slot_inactive() behave on-target.
     memset(out, 0, sizeof(*out));
     out->active = SLOT_A;
-    out->slot[SLOT_A].flash_offset = 0x00000000u;
-    out->slot[SLOT_B].flash_offset = 0x00080000u;
+    out->slot[SLOT_A].flash_offset = FLASH_SLOT_A_OFFSET;
+    out->slot[SLOT_B].flash_offset = FLASH_SLOT_B_OFFSET;
     return true;
 }
 bool hal_meta_write(const model_meta_t *m) {
@@ -96,13 +108,31 @@ bool hal_meta_write(const model_meta_t *m) {
 //  Flash layout — these offsets come from your flash plan / linker, NOT guesses.
 //  VERIFY: set to the actual reserved regions in the QSPI Configurator / .ld.
 // =============================================================================
-// Two metadata copies for power-fail-atomic updates (see meta_store). VERIFY: two distinct
-// reserved sectors in the QSPI Configurator / .ld.
-#define META_FLASH_OFFSET_A (0x00100000u)
-#define META_FLASH_OFFSET_B (0x00110000u)
+// Two metadata copies for power-fail-atomic updates (see meta_store), one sector each, placed
+// AFTER both 1 MB model slots (FLASH_SLOT_A/B_OFFSET) so a slot erase never reaches them.
+// VERIFY: two distinct reserved sectors in the QSPI Configurator / .ld.
+#define META_FLASH_OFFSET_A (0x00200000u)
+#define META_FLASH_OFFSET_B (0x00210000u)
 // VERIFY: the memory-mapped base the SMIF exposes for XIP reads on the E84.
 // On CAT1 parts this is the SMIF XIP region base (e.g. CY_XIP_BASE); confirm for E84.
+// Must match npu_infer.c's SMIF_XIP_BASE — both cores read the same flash.
 #define SMIF_XIP_BASE       (0x60000000u)
+// VERIFY: QSPI bus clock for the E84 board's flash part (Hz).
+#define QSPI_BUS_FREQUENCY_HZ (50000000UL)
+
+bool hal_flash_init(void) {
+    // Bring up the SMIF serial flash, then enable XIP once so hal_flash_xip_map just returns an
+    // address. VERIFY: the init signature for the E84 serial-flash middleware version (legacy cyhal
+    // vs mtb-hal), the QSPI Configurator block config (smifBlockConfig.memConfig[0]) and the
+    // CYBSP_QSPI_* pin symbols from the Device Configurator.
+    if (cy_serial_flash_qspi_init(smifBlockConfig.memConfig[0],
+                                  CYBSP_QSPI_D0, CYBSP_QSPI_D1, CYBSP_QSPI_D2, CYBSP_QSPI_D3,
+                                  NC, NC, NC, NC, CYBSP_QSPI_SCK, CYBSP_QSPI_SS,
+                                  QSPI_BUS_FREQUENCY_HZ) != CY_RSLT_SUCCESS) {
+        return false;
+    }
+    return cy_serial_flash_qspi_enable_xip(true) == CY_RSLT_SUCCESS;
+}
 
 bool hal_flash_erase(uint32_t offset, uint32_t len) {
     // VERIFY: erase granularity — must be sector-aligned; the middleware erases
@@ -117,12 +147,12 @@ bool hal_flash_program(uint32_t offset, const uint8_t *data, uint32_t len) {
 }
 
 const uint8_t *hal_flash_xip_map(uint32_t offset) {
-    // Put the SMIF in memory-mapped (XIP) mode so the flatbuffer is directly
-    // addressable, then hand TFLM a pointer. (Alternative: copy into HYPERRAM.)
-    if (cy_serial_flash_qspi_enable_xip(true) != CY_RSLT_SUCCESS) {
-        return NULL;
-    }
-    // VERIFY: SMIF_XIP_BASE for the E84. The mapped address is base + flash offset.
+    // XIP (memory-mapped) mode is enabled once at boot (cy_serial_flash_qspi_enable_xip in the
+    // board bring-up), so the flatbuffer is directly addressable here — just return its address.
+    // The serial-flash middleware re-enters command mode internally for erase/program, so writes
+    // to the inactive slot still work with XIP enabled.
+    // VERIFY: SMIF_XIP_BASE for the E84, and that erase/program coexist with XIP on this middleware
+    // version (older serial-flash needs an explicit enable_xip(false) around writes).
     return (const uint8_t *)(SMIF_XIP_BASE + offset);
 }
 
@@ -138,8 +168,17 @@ bool hal_meta_read(model_meta_t *out) {
     if (!read_both_copies(&a, &b)) {
         return false;
     }
-    // Highest valid sequence wins; -1 means neither copy is valid (uninitialised).
-    return meta_select_newest(&a, &b, out) >= 0;
+    // Highest valid sequence wins. -1 means neither copy is valid: uninitialised flash on a fresh /
+    // pre-commission device. Synthesize an empty layout (slot A active, no flash model) so the
+    // device still boots — CM55 runs its baked model and the first deploy initialises the metadata.
+    if (meta_select_newest(&a, &b, out) < 0) {
+        memset(out, 0, sizeof(*out));
+        out->active = SLOT_A;
+        out->slot[SLOT_A].flash_offset = FLASH_SLOT_A_OFFSET;
+        out->slot[SLOT_B].flash_offset = FLASH_SLOT_B_OFFSET;
+        // len = 0, valid = false -> model_loader treats both slots as "no flash model".
+    }
+    return true;
 }
 
 bool hal_meta_write(const model_meta_t *m) {
@@ -160,7 +199,12 @@ bool hal_meta_write(const model_meta_t *m) {
     blob.meta = *m;
     meta_blob_finalize(&blob);  // stamps magic + crc
 
-    if (cy_serial_flash_qspi_erase(off, sizeof(blob)) != CY_RSLT_SUCCESS) {
+    // cy_serial_flash_qspi_erase requires a sector-aligned offset and a sector-multiple length, so
+    // erase the whole metadata sector (the blob fits within one). VERIFY: sizeof(meta_blob_t) does
+    // not exceed the device sector size at this offset.
+    size_t sector = cy_serial_flash_qspi_get_erase_size(off);
+    if (sector == 0 || sizeof(blob) > sector ||
+        cy_serial_flash_qspi_erase(off, sector) != CY_RSLT_SUCCESS) {
         return false;
     }
     return cy_serial_flash_qspi_write(off, sizeof(blob), (const uint8_t *)&blob)

@@ -19,6 +19,10 @@
 // =============================================================================
 
 // ---- QSPI NOR flash (SMIF) — the model slots live here ----------------------
+// Bring up the QSPI serial flash that holds the model slots + metadata and enable XIP so a slot's
+// flatbuffer is memory-mapped for the NPU. Call ONCE at boot, before any other hal_flash_* /
+// hal_meta_* call. Returns false if flash bring-up fails. (Connectivity/stub build: no-op true.)
+bool hal_flash_init(void);
 // Erase then program a region of external flash (the INACTIVE slot during an update).
 bool hal_flash_erase(uint32_t offset, uint32_t len);
 bool hal_flash_program(uint32_t offset, const uint8_t *data, uint32_t len);
