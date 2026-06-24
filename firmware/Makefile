@@ -38,6 +38,23 @@ nats-login: $(BUILD)/harness_nats_login
 $(BUILD)/harness_nats_login: src/nats_proto.c test/harness_nats_login.c | $(BUILD)
 	$(CC) $(CFLAGS) src/nats_proto.c test/harness_nats_login.c -o $@
 
+## features-cross: prove the C feature extractor matches spectro.py byte-for-byte (needs the export venv)
+PYEXPORT := ../wear_detector/export/.venv/bin/python
+.PHONY: features-cross
+features-cross: $(BUILD)/harness_features
+	$(PYEXPORT) test/feature_cross_test.py ./$(BUILD)/harness_features
+
+$(BUILD)/harness_features: src/features.c test/harness_features.c | $(BUILD)
+	$(CC) $(CFLAGS) src/features.c test/harness_features.c -lm -o $@
+
+## score-cross: prove the C scorer matches baseline.distances (needs the export venv + built model)
+.PHONY: score-cross
+score-cross: $(BUILD)/harness_score
+	$(PYEXPORT) test/score_cross_test.py ./$(BUILD)/harness_score
+
+$(BUILD)/harness_score: src/score.c test/harness_score.c | $(BUILD)
+	$(CC) $(CFLAGS) src/score.c test/harness_score.c -lm -o $@
+
 $(BUILD):
 	mkdir -p $(BUILD)
 
