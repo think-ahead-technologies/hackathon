@@ -23,11 +23,14 @@
 // NATS_HOST/NATS_PORT are build-overridable (e.g. `make build NATS_HOST=10.0.0.5`); the
 // default is the edge-node demo broker. Host may be a dotted-quad (LAN) or a DNS name (cloud).
 #ifndef NATS_HOST
-#define NATS_HOST   "192.168.1.50"
+#define NATS_HOST   "wallnats.ganter.dev"
 #endif
 #ifndef NATS_PORT
 #define NATS_PORT   4222
 #endif
+// Connect retry: tolerate DNS/network not being ready immediately after Wi-Fi association.
+#define NATS_CONNECT_RETRIES  15
+#define NATS_CONNECT_RETRY_MS 2000
 #define LINE        "line1"
 #define CONTAINER   "cnc-7"
 #define PUB_SUBJECT "edge." LINE "." CONTAINER          // through the Vector boundary
@@ -223,7 +226,16 @@ int device_main(void) {
     if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
     if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
 
-    int sock = hal_tcp_connect(NATS_HOST, NATS_PORT);
+    // Retry the broker connect: right after Wi-Fi associates, DNS / the network may not be
+    // ready for a beat, and a single miss would otherwise strand the device until reset.
+    int sock = -1;
+    for (int attempt = 1; attempt <= NATS_CONNECT_RETRIES; attempt++) {
+        sock = hal_tcp_connect(NATS_HOST, NATS_PORT);
+        if (sock >= 0) break;
+        printf("[net] connect attempt %d/%d failed; retrying in %d ms\n",
+               attempt, NATS_CONNECT_RETRIES, NATS_CONNECT_RETRY_MS);
+        hal_sleep_ms(NATS_CONNECT_RETRY_MS);
+    }
     if (sock < 0) return 1;
 
     char line[256];

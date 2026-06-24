@@ -55,6 +55,10 @@ bool hal_nkey_sign(const uint8_t *nonce, size_t len, uint8_t sig[64]);
 // hal_tcp_connect() assumes this has already succeeded.
 bool hal_net_init(void);
 
+// Block the calling task for `ms` milliseconds (RTOS-aware; yields the CPU). Used to
+// space out connect retries while DNS / the network settle after Wi-Fi association.
+void hal_sleep_ms(uint32_t ms);
+
 // ---- Network transport (AIROC CYW55513 Wi-Fi -> TCP) ------------------------
 // Open a TCP connection to the NATS broker. `host` may be a dotted-quad IPv4
 // (LAN edge node) or a DNS hostname (a cloud broker) — it is resolved either way.

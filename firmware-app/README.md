@@ -32,6 +32,7 @@ cd firmware-app
 export CY_TOOLS_PATHS=/Applications/ModusToolbox/tools_3.8
 make getlibs            # first time only (pulls middleware into ../mtb_shared)
 make build -j8          # produces build/app_combined.hex (all 3 cores, signed)
+make logs               # stream the device debug UART (Ctrl-C to stop); `make logs-reset` from boot
 ```
 
 Reusing an existing shared library cache (e.g. the one under `~/mtw`) avoids a multi-GB download:

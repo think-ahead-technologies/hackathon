@@ -4,7 +4,7 @@
 services:
   nats:
     image: nats:2.14.2-alpine
-    command: ["-js", "-m", "8222"]          # JetStream on; monitoring on :8222
+    command: ["-js", "-m", "8222", "-DV"]    # JetStream on; monitoring on :8222; -D = debug logs
     ports:
       - "4222:4222"
       - "8222:8222"
