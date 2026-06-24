@@ -166,11 +166,18 @@ level) reaches **AUC 0.89**:
 | `hi_active_frac` | fraction of clip with active high-band sound | 0.85 |
 
 Equal-error point: **FPR 0.06, FNR 0.17**. A faulty bearing is simply *louder and more
-sustained in the high band* — exactly "rattle/squeal" to a human. The one miss is the
-vague "vibration" clip; the one false-alarm is a loud-but-not-flagged "rattle" clip
-(label-boundary cases). With only 24 clips the combined-model CI is wide
-([0.44, 1.00]); the **single physical indicator is the robust, presentable result** —
-and it vindicates the high-frequency / on-device case.
+sustained in the high band* — exactly "rattle/squeal" to a human.
+
+**Validated across two independent recordings** (test1: 54 clips/7 fault; test2:
+24 clips/6 fault) — it isn't small-sample luck:
+
+![audio cross-recording](figures/audio-cross-recording.png)
+
+Within-recording AUC 0.85 and 0.89; pooled (78 clips, 13 faults) **AUC 0.87**,
+equal-error FPR 0.17 / FNR 0.15. The *ranking* transfers across recordings, but the
+*absolute threshold* does not (mic gain/distance differ) — so the threshold needs
+**per-recording calibration**, which is exactly what the feedback loop does (calibrate
+from the technician's marks). This vindicates the high-frequency / on-device case.
 
 Run **continuously** (0.5 s windows, smoothed over 2 s since faults are sustained) it
 becomes a real-time detector:
