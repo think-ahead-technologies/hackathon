@@ -64,6 +64,9 @@ static bool          g_shadowing = false;
 static slot_id_t     g_candidate_slot;
 static shadow_stats_t g_shadow;
 
+// Contract E capture watch-set (segments the platform asked us to record). Pure, host-tested.
+static capture_set_t g_capture;
+
 // ---- Contract C deploy session ---------------------------------------------
 #define DEPLOY_MANIFEST_MAX 1024u
 #define MODEL_SLOT_BYTES    (1024u * 1024u)  // VERIFY: reserved per-slot flash size (>= worst case)
@@ -350,18 +353,20 @@ int device_main(void) {
         publish_score(sock, score);
 
         // While listening, record this window whenever the device is on a watched segment.
-        if (capture_listening(&g_capture)) {
+        // The feature window is computed on CM55 and mirrored into the shared mailbox; publish
+        // that (only meaningful once CM55 is live, i.e. magic is set).
+        if (capture_listening(&g_capture) && SHARED_SCORE->magic == SHARED_SCORE_MAGIC) {
             char seg[32];
             if (!hal_track_segment(seg, sizeof(seg))) seg[0] = '\0';
             const capture_entry_t *e = capture_match(&g_capture, seg);
             if (e != NULL) {
-                publish_capture_window(sock, features, sizeof(features), e, g_capture.seq);
+                publish_capture_window(sock, (const int8_t *)SHARED_SCORE->features,
+                                       FEAT_OUT_LEN, e, g_capture.seq);
                 capture_advance(&g_capture);
             }
         }
-
-        if (g_shadowing && have_candidate) {
-            evaluate_shadow(score, candidate_score);
-        }
+        // Note: on-device shadow promote/rollback (evaluate_shadow) ran when CM33 itself
+        // executed both active + candidate models. In the NPU architecture inference lives on
+        // CM55, so shadowing belongs there; CM33 no longer evaluates it here.
     }
 }

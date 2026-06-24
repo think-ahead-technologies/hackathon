@@ -55,3 +55,22 @@ CY_COMPILER_GCC_ARM_DIR?=
 ifeq ($(CY_TOOLS_DIR),)
 $(error Unable to find any of the available CY_TOOLS_PATHS -- $(CY_TOOLS_PATHS))
 endif
+
+################################################################################
+# Shared library cache
+################################################################################
+
+# The middleware is resolved into a shared cache OUTSIDE this repo (multi-GB,
+# gitignored). Every build needs CY_GETLIBS_SHARED_PATH + CY_GETLIBS_SHARED_NAME
+# to point at it: the getlibs-generated proj_*/libs/mtb.mk hardcodes each library
+# as $(CY_GETLIBS_SHARED_PATH)/$(CY_GETLIBS_SHARED_NAME)/<lib>. With them unset the
+# paths collapse to "/mtb_shared/..." and the build aborts with
+# "Libraries: core-make recipe-make ... not found".
+#
+# Default to the known local cache so a bare `make firmware`/`build`/`program`
+# just works. Override on the CLI or environment for a different location, e.g.:
+#   make build CY_GETLIBS_SHARED_PATH=/path/to/parent CY_GETLIBS_SHARED_NAME=mtb_shared
+CY_GETLIBS_SHARED_NAME ?= mtb_shared
+ifneq ($(wildcard $(HOME)/mtw/$(CY_GETLIBS_SHARED_NAME)),)
+CY_GETLIBS_SHARED_PATH ?= $(HOME)/mtw
+endif

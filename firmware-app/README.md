@@ -29,18 +29,31 @@ corrupt anything — while Wi-Fi + TLS + NATS publish run for real.
 
 ```bash
 cd firmware-app
-export CY_TOOLS_PATHS=/Applications/ModusToolbox/tools_3.8
-make getlibs            # first time only (pulls middleware into ../mtb_shared)
-make build -j8          # produces build/app_combined.hex (all 3 cores, signed)
+make firmware           # one shot: resolve middleware (first run) + build all 3 cores
+make flash              # back up the device, then program build/app_combined.hex
 make logs               # stream the device debug UART (Ctrl-C to stop); `make logs-reset` from boot
+make help               # list the convenience targets
 ```
 
-Reusing an existing shared library cache (e.g. the one under `~/mtw`) avoids a multi-GB download:
+`make firmware` produces `build/app_combined.hex` (all 3 cores, signed). Wi-Fi / NATS overrides pass
+straight through, e.g. `make firmware WIFI_SSID=net WIFI_PASSWORD=pw NATS_HOST=10.0.0.5 NATS_PORT=4222`.
+
+**No manual env needed.** `CY_TOOLS_PATHS` is auto-detected (`/Applications/ModusToolbox/tools_*`), and
+the shared library cache defaults to `~/mtw/mtb_shared` (see `common_app.mk`) so `getlibs`/`build`/`program`
+reuse it instead of re-downloading multiple GB. Both are plain `make` variables — override on the command
+line for a different location:
 
 ```bash
-make getlibs CY_GETLIBS_SHARED_PATH=/Users/rlang/mtw CY_GETLIBS_SHARED_NAME=mtb_shared
-make build  CY_GETLIBS_SHARED_PATH=/Users/rlang/mtw CY_GETLIBS_SHARED_NAME=mtb_shared -j8
+make firmware CY_GETLIBS_SHARED_PATH=/path/to/parent CY_GETLIBS_SHARED_NAME=mtb_shared
 ```
+
+> Why this needed wiring: the `getlibs`-generated `proj_*/libs/mtb.mk` hardcodes every library path as
+> `$(CY_GETLIBS_SHARED_PATH)/$(CY_GETLIBS_SHARED_NAME)/<lib>`, and each project Makefile previously pinned
+> `CY_GETLIBS_SHARED_PATH=../..` (a nonexistent `mtb_shared` one level up). With those unset/wrong the build
+> aborted with `Libraries: core-make recipe-make ... not found`. Those lines are now `?=` so the default wins.
+
+Under the hood `make firmware` is just `getlibs` (first run only) + `make build -j8`; the individual MTB
+targets (`make build`, `make program`, `make getlibs`) still work directly.
 
 ### Configure Wi-Fi + broker
 

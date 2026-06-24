@@ -78,6 +78,7 @@ SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/meta_store.c \
          $(FW_SRC)/manifest.c \
          $(FW_SRC)/deploy.c \
+         $(FW_SRC)/capture.c \
          $(FW_SRC)/platform_hal_pse84.c \
          $(FW_SRC)/model_loader_stub.c \
          $(FW_SRC)/device_main.c
@@ -189,10 +190,10 @@ CY_APP_PATH=
 # directory level above the current app directory.
 # This is used with CY_GETLIBS_SHARED_NAME variable, which specifies the 
 # directory name.
-CY_GETLIBS_SHARED_PATH=../..
+CY_GETLIBS_SHARED_PATH?=../..
 
 # Directory name of the shared repo location.
 #
-CY_GETLIBS_SHARED_NAME=mtb_shared
+CY_GETLIBS_SHARED_NAME?=mtb_shared
 
 include $(CY_TOOLS_DIR)/make/start.mk

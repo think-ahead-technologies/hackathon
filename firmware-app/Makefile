@@ -42,13 +42,33 @@ MTB_PROJECTS=proj_cm33_s proj_cm33_ns proj_cm55
 # Paths
 ################################################################################
 
-# Local convenience targets that don't need the ModusToolbox build machinery (serial console).
-# Skip the heavy application.mk include for these so `make logs` is instant and toolchain-free.
-LOCAL_GOALS := logs logs-reset
+# Number of parallel build jobs (override with `make firmware JOBS=4`).
+JOBS ?= 8
+
+# Local convenience targets that don't need the ModusToolbox build machinery (serial console,
+# flashing via scripts, help). Skip the heavy application.mk include for these so they're instant
+# and toolchain-free. `firmware` is intentionally NOT local: it recurses into the real build.
+LOCAL_GOALS := logs logs-reset flash help
 ifeq ($(filter $(LOCAL_GOALS),$(MAKECMDGOALS)),)
 include common_app.mk
 include $(CY_TOOLS_DIR)/make/application.mk
 endif
+
+## firmware:   one-shot full build of all 3 cores -> build/app_combined.hex.
+##             Resolves middleware on first run; passes WIFI_SSID=.. NATS_HOST=.. etc. straight
+##             through (e.g. `make firmware WIFI_SSID=net WIFI_PASSWORD=pw NATS_HOST=10.0.0.5`).
+.PHONY: firmware
+firmware:
+	@if [ ! -f proj_cm33_ns/libs/mtb.mk ]; then \
+	  echo "==> First build: resolving middleware (make getlibs)…"; \
+	  $(MAKE) getlibs; \
+	fi
+	@$(MAKE) build -j$(JOBS)
+
+## flash:      back up the device, then program the last build (scripts/device-flash.sh)
+.PHONY: flash
+flash:
+	@scripts/device-flash.sh
 
 ## logs:       stream the device debug UART (Ctrl-C to stop). Override PORT=/dev/cu.usbmodemXXXX
 .PHONY: logs
@@ -59,3 +79,8 @@ logs:
 .PHONY: logs-reset
 logs-reset:
 	@scripts/device-logs.sh --reset
+
+## help:       list these convenience targets
+.PHONY: help
+help:
+	@grep -hE '^## ' $(firstword $(MAKEFILE_LIST)) | sed 's/^## //'

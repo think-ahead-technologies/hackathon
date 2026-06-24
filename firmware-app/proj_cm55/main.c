@@ -40,7 +40,6 @@
 #include "features.h"
 #include "score.h"
 #include "shared_score.h"
-#include "imu.h"
 
 /*******************************************************************************
  * Macros
@@ -144,28 +143,25 @@ static void cm55_task(void * arg)
 
     SHARED_SCORE->magic = 0;   /* not ready yet */
 
-    if (!npu_infer_init() || !imu_init())
+    if (!npu_infer_init())
     {
-        for (;;) { vTaskSuspend(NULL); }   /* NPU or IMU bring-up failed */
+        for (;;) { vTaskSuspend(NULL); }   /* NPU bring-up failed */
     }
 
-    static float accel_window[FEAT_WINDOW_SAMPLES * 3];
+    static float accel_window[FEAT_WINDOW_SAMPLES * 3]; /* TODO(imu): fill from I2C IMU @ 50 Hz */
     static int8_t features[FEAT_OUT_LEN];
     static dwell_t dwell;                                /* zero-initialized */
     for (;;)
     {
-        /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. */
-        for (int i = 0; i < FEAT_WINDOW_SAMPLES; i++)
-        {
-            imu_read_accel_ms2(&accel_window[i * 3]);
-            vTaskDelay(pdMS_TO_TICKS(20));   /* ~50 Hz (FEAT_FS) */
-        }
-
         /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
         features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
         float score = npu_infer(features, FEAT_OUT_LEN);
         if (score >= 0.0f)
         {
+            /* Mirror the window into the mailbox so CM33 can publish it for Contract E capture. */
+            for (int i = 0; i < FEAT_OUT_LEN; i++) {
+                SHARED_SCORE->features[i] = features[i];
+            }
             SHARED_SCORE->score = score_dwell(&dwell, score);
             SHARED_SCORE->seq++;
             SHARED_SCORE->magic = SHARED_SCORE_MAGIC;
