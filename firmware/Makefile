@@ -2,7 +2,9 @@
 # ABOUTME: The TFLM/Ethos-U/SMIF integration (model_loader.cc, device_main.c) is built on-target only.
 
 CC      ?= cc
-CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -Iinclude
+# -iquote (not -I): our headers are included with "...", so this keeps include/ off the
+# <...> search path — otherwise our include/features.h shadows glibc's <features.h> on Linux.
+CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -iquote include
 BUILD   := build
 
 # Pure, host-testable logic — no hardware, no TFLM.
@@ -20,7 +22,7 @@ test: $(BUILD)/tests
 	./$(BUILD)/tests
 
 $(BUILD)/tests: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
-	$(CC) $(CFLAGS) -Itest $(LOGIC_SRC) $(TEST_SRC) -o $@
+	$(CC) $(CFLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $@
 
 ## crosslang: prove deploy_frame.py output parses byte-identically through the C deploy/manifest code
 .PHONY: crosslang
