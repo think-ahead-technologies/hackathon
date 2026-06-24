@@ -32,6 +32,13 @@ RETRAIN_AFTER_LABELS = int(os.environ.get("RETRAIN_AFTER_LABELS", "1"))
 
 VALID_LABELS = {"bearing wear", "imbalance", "dismiss"}
 
+# Track annotation fault classes (operator marks an error on a track segment).
+# Mirrors the features in idea.md: turn table, bumps, rubber-band slippage, bearings, servos.
+TRACK_FAULTS = {
+    "bearing wear", "imbalance", "turn table", "track bump",
+    "rubber band slippage", "servo motor", "dismiss",
+}
+
 
 # --- pure logic (unit-tested in test_bridge.py) ---------------------------
 
@@ -97,6 +104,11 @@ def should_queue_retrain(new_labels: int, threshold: int) -> bool:
 def next_model_version(deployed_count: int) -> str:
     """Auto-name the next retrained model when a deploy doesn't specify one."""
     return f"pdm-anomaly@retrained-{deployed_count + 1}"
+
+
+def valid_track_fault(label) -> bool:
+    """A track annotation's fault class must be one the model can retrain on."""
+    return label in TRACK_FAULTS
 
 
 # --- persistence ----------------------------------------------------------
@@ -279,6 +291,81 @@ async def get_alerts(request: web.Request) -> web.Response:
     )
 
 
+async def get_track(request: web.Request) -> web.Response:
+    """Model's view of the track: latest score + fault_class per segment (location).
+
+    The video localizer stamps each inference with a `location` (segment id); this
+    rolls those up to one row per segment so the track view can paint a heatmap and
+    show which segments the model has flagged.
+    """
+    pool = request.app["pool"]
+    async with pool.acquire() as con:
+        rows = await con.fetch(
+            "SELECT DISTINCT ON (location) location, container_id, anomaly_score,"
+            " fault_class, ts FROM scores WHERE location IS NOT NULL"
+            " ORDER BY location, ts DESC"
+        )
+        open_alerts = await con.fetch(
+            "SELECT container_id FROM alerts WHERE state='unlabeled'"
+        )
+    alerting = {r["container_id"] for r in open_alerts}
+    return web.json_response({
+        "threshold": THRESHOLD,
+        "segments": [
+            {
+                "location": r["location"],
+                "container_id": r["container_id"],
+                "anomaly_score": r["anomaly_score"],
+                "fault_class": r["fault_class"],
+                "ts": r["ts"].isoformat() if r["ts"] else None,
+                "alerting": r["container_id"] in alerting,
+            }
+            for r in rows
+        ],
+    })
+
+
+async def get_annotations(request: web.Request) -> web.Response:
+    """Operator annotations: most-recent label per segment (location = container_id)."""
+    pool = request.app["pool"]
+    async with pool.acquire() as con:
+        rows = await con.fetch(
+            "SELECT DISTINCT ON (container_id) container_id, label, feature_window_ref, ts"
+            " FROM labels ORDER BY container_id, ts DESC"
+        )
+    return web.json_response([
+        {
+            "location": r["container_id"],
+            "label": r["label"],
+            "note": r["feature_window_ref"],
+            "ts": r["ts"].isoformat() if r["ts"] else None,
+        }
+        for r in rows
+    ])
+
+
+async def post_annotate(request: web.Request) -> web.Response:
+    """Operator marks an error on a track segment -> publish Contract D keyed by location."""
+    body = await request.json()
+    line = body.get("line", "line1")
+    location = body.get("location")
+    fault = body.get("fault")
+    if not location or not valid_track_fault(fault):
+        return web.json_response(
+            {"error": "location and a valid fault required", "valid": sorted(TRACK_FAULTS)},
+            status=400,
+        )
+    payload = {
+        "ts": await _now_iso(request.app["pool"]),
+        "container_id": location,           # the segment is the labeled asset
+        "feature_window_ref": body.get("note") or f"track:{location}",
+        "label": fault,
+    }
+    subject = label_subject(line, location)
+    await request.app["nc"].publish(subject, json.dumps(payload).encode())
+    return web.json_response({"ok": True, "subject": subject})
+
+
 async def metrics(request: web.Request) -> web.Response:
     """Stretch: a minimal Prometheus exposition derived from recent rows."""
     pool = request.app["pool"]
@@ -413,7 +500,10 @@ async def main() -> None:
     app.router.add_post("/label", post_label)
     app.router.add_post("/deploy", post_deploy)
     app.router.add_post("/control", post_control)
+    app.router.add_post("/annotate", post_annotate)
     app.router.add_get("/alerts", get_alerts)
+    app.router.add_get("/track", get_track)
+    app.router.add_get("/annotations", get_annotations)
     app.router.add_get("/model_events", get_model_events)
     app.router.add_get("/metrics", metrics)
     app.router.add_get("/healthz", lambda r: web.json_response({"ok": True}))

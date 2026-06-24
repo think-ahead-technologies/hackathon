@@ -1,0 +1,320 @@
+<!doctype html>
+<!-- ABOUTME: Track view — paints the model's per-segment anomaly heatmap on the loop, -->
+<!-- ABOUTME: and lets an operator annotate an error on any segment (Contract D by location). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Edge Ops · Track</title>
+  <style>
+    :root {
+      --coral: #D85A30;
+      --teal:  #1D9E75;
+      --purple:#534AB7;
+      --ink:   #1b1d23;
+      --paper: #f5f6f8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--ink); color: var(--paper); min-height: 100vh;
+    }
+    header {
+      padding: 20px 28px; border-bottom: 1px solid #2c2f38;
+      display: flex; align-items: baseline; gap: 14px;
+    }
+    header h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+    header .sub { color: #8b909c; font-size: 13px; }
+    header .nav { margin-left: auto; }
+    header .nav a {
+      color: #8b909c; text-decoration: none; font-size: 13px; font-weight: 600;
+      padding: 7px 12px; border: 1px solid #2c2f38; border-radius: 8px;
+    }
+    header .nav a:hover { color: var(--paper); border-color: #444; }
+    main { padding: 24px 28px; max-width: 980px; margin: 0 auto; }
+    .board { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+    .track-wrap { flex: 1 1 560px; min-width: 320px; }
+    svg { width: 100%; height: auto; display: block; }
+    .seg { cursor: pointer; transition: filter .12s ease; }
+    .seg:hover { filter: brightness(1.15); }
+    .seg-box { stroke: #00000033; stroke-width: 1.5; rx: 8; }
+    .seg-turn { stroke-dasharray: 4 3; }
+    .seg-label { fill: #ffffffcc; font-size: 12px; font-weight: 600; pointer-events: none; }
+    .seg-fault { fill: #fff; font-size: 10px; font-weight: 700; pointer-events: none; }
+    .alerting { stroke: var(--coral); stroke-width: 3; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100% { stroke-opacity: 1; } 50% { stroke-opacity: .35; } }
+    .flag { pointer-events: none; }
+    .flag circle { fill: var(--purple); stroke: #fff; stroke-width: 1.5; }
+    .flag text { fill: #fff; font-size: 10px; font-weight: 700; text-anchor: middle; }
+
+    .panel {
+      flex: 0 0 320px; background: #23262f; border: 1px solid #2c2f38;
+      border-radius: 12px; padding: 18px 20px;
+    }
+    .panel h2 { font-size: 14px; margin: 0 0 4px; }
+    .panel .hint { color: #8b909c; font-size: 12px; margin: 0 0 14px; }
+    .panel .seg-name { color: var(--coral); }
+    .meta { font-size: 12px; color: #8b909c; margin: 0 0 14px; line-height: 1.6; }
+    .meta b { color: var(--paper); font-weight: 600; }
+    .faults { display: flex; flex-direction: column; gap: 8px; }
+    .faults button {
+      cursor: pointer; border: 1px solid #3a3e49; background: #2b2f39; color: var(--paper);
+      border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600; text-align: left;
+      transition: filter .12s ease, border-color .12s ease;
+    }
+    .faults button:hover { border-color: var(--purple); filter: brightness(1.1); }
+    .faults button.dismiss { color: #8b909c; }
+    .note { width: 100%; margin: 12px 0 0; background: #1b1d23; color: var(--paper);
+      border: 1px solid #3a3e49; border-radius: 8px; padding: 9px 11px; font-size: 13px; }
+    .legend { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 12px; color: #8b909c; }
+    .grad { flex: 1; height: 10px; border-radius: 5px;
+      background: linear-gradient(90deg, var(--teal), #d9a441, var(--coral)); }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--teal); color: white; padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; opacity: 0; transition: opacity .2s ease; pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Edge Ops · Track</h1>
+    <span class="sub">model heatmap + operator error annotations (Contract D)</span>
+    <span class="nav"><a href="index.html">← Alerts</a></span>
+  </header>
+  <main>
+    <div class="board">
+      <div class="track-wrap">
+        <svg id="track" viewBox="110 0 290 760" role="img" aria-label="Conveyor track loop">
+          <g id="segments"></g>
+          <g id="flags"></g>
+        </svg>
+        <div class="legend">
+          healthy
+          <div class="grad"></div>
+          fault · <span id="thr">thr —</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 id="sel-title">Select a segment</h2>
+        <p class="hint">Click a segment to annotate an error. The model's heatmap is live.</p>
+        <div id="sel-meta" class="meta" hidden></div>
+        <div id="faults" class="faults" hidden></div>
+        <input id="note" class="note" placeholder="optional note…" hidden />
+      </div>
+    </div>
+  </main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const BRIDGE = params.get("bridge") || `http://${location.hostname || "localhost"}:8000`;
+    const LINE = params.get("line") || "line1";
+
+    // Track topology — the figure-8 loop from track-scheme.drawio: a small top loop
+    // and a larger bottom loop sharing a middle crossbar (6 turns, 17 straights; the
+    // length-4 pieces are the tall segments). `location` is the segment id the video
+    // localizer stamps onto each inference (Contract B).
+    const TRACK = [
+      // top row
+      { id: "turn-1", x: 120, y: 10,  w: 50,  h: 50,  turn: true },
+      { id: "seg-1",  x: 180, y: 10,  w: 70,  h: 50  },
+      { id: "seg-2",  x: 260, y: 10,  w: 70,  h: 50  },
+      { id: "turn-2", x: 340, y: 10,  w: 50,  h: 50,  turn: true },
+      // top loop sides
+      { id: "seg-3",  x: 120, y: 70,  w: 50,  h: 70,  vertical: true },
+      { id: "seg-4",  x: 340, y: 70,  w: 50,  h: 70,  vertical: true },
+      // middle crossbar (shared edge)
+      { id: "turn-3", x: 120, y: 150, w: 50,  h: 50,  turn: true },
+      { id: "seg-5",  x: 180, y: 150, w: 70,  h: 50  },
+      { id: "seg-6",  x: 260, y: 150, w: 70,  h: 50  },
+      { id: "turn-4", x: 340, y: 150, w: 50,  h: 50,  turn: true },
+      // bottom loop left side (2,2,4,4)
+      { id: "seg-7",  x: 120, y: 210, w: 50,  h: 70,  vertical: true },
+      { id: "seg-8",  x: 120, y: 290, w: 50,  h: 70,  vertical: true },
+      { id: "seg-9",  x: 120, y: 370, w: 50,  h: 150, vertical: true, len: 4 },
+      { id: "seg-10", x: 120, y: 530, w: 50,  h: 150, vertical: true, len: 4 },
+      // bottom loop right side (2,2,4,2,2)
+      { id: "seg-11", x: 340, y: 210, w: 50,  h: 70,  vertical: true },
+      { id: "seg-12", x: 340, y: 290, w: 50,  h: 70,  vertical: true },
+      { id: "seg-13", x: 340, y: 370, w: 50,  h: 150, vertical: true, len: 4 },
+      { id: "seg-14", x: 340, y: 530, w: 50,  h: 70,  vertical: true },
+      { id: "seg-15", x: 340, y: 610, w: 50,  h: 70,  vertical: true },
+      // bottom row
+      { id: "turn-5", x: 120, y: 690, w: 50,  h: 50,  turn: true },
+      { id: "seg-16", x: 180, y: 690, w: 70,  h: 50  },
+      { id: "seg-17", x: 260, y: 690, w: 70,  h: 50  },
+      { id: "turn-6", x: 340, y: 690, w: 50,  h: 50,  turn: true },
+    ];
+
+    const FAULTS = [
+      "bearing wear", "imbalance", "turn table",
+      "track bump", "rubber band slippage", "servo motor",
+    ];
+
+    const SVGNS = "http://www.w3.org/2000/svg";
+    let THRESHOLD = 0.6;
+    let selected = null;
+    const model = {};        // location -> {anomaly_score, fault_class, alerting, ts}
+    const annotations = {};  // location -> {label, note, ts}
+
+    function toast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 1800);
+    }
+
+    // teal -> amber -> coral by score (0..1)
+    function heat(score) {
+      if (score == null) return "#2b2f39";           // no data: neutral
+      const s = Math.max(0, Math.min(1, score));
+      const a = [0x1d, 0x9e, 0x75], b = [0xd9, 0xa4, 0x41], c = [0xd8, 0x5a, 0x30];
+      const lerp = (x, y, t) => Math.round(x + (y - x) * t);
+      let col;
+      if (s < 0.5) { const t = s / 0.5; col = a.map((v, i) => lerp(v, b[i], t)); }
+      else { const t = (s - 0.5) / 0.5; col = b.map((v, i) => lerp(v, c[i], t)); }
+      return `rgb(${col[0]},${col[1]},${col[2]})`;
+    }
+
+    function el(tag, attrs) {
+      const n = document.createElementNS(SVGNS, tag);
+      for (const k in attrs) n.setAttribute(k, attrs[k]);
+      return n;
+    }
+
+    function buildTrack() {
+      const g = document.getElementById("segments");
+      g.innerHTML = "";
+      for (const s of TRACK) {
+        const grp = el("g", { class: "seg" });
+        grp.dataset.id = s.id;
+        const rect = el("rect", {
+          x: s.x, y: s.y, width: s.w, height: s.h, rx: 8,
+          class: "seg-box" + (s.turn ? " seg-turn" : ""),
+          fill: "#2b2f39",
+        });
+        rect.dataset.role = "box";
+        grp.appendChild(rect);
+
+        const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+        const label = el("text", {
+          x: cx, y: cy + 4, "text-anchor": "middle", class: "seg-label",
+          transform: s.vertical ? `rotate(-90 ${cx} ${cy})` : "",
+        });
+        label.textContent = s.turn ? "↻" : s.id.replace("seg-", "S");
+        grp.appendChild(label);
+
+        const fault = el("text", {
+          x: cx, y: cy + 18, "text-anchor": "middle", class: "seg-fault",
+          transform: s.vertical ? `rotate(-90 ${cx} ${cy})` : "",
+        });
+        fault.dataset.role = "fault";
+        grp.appendChild(fault);
+
+        grp.addEventListener("click", () => select(s.id));
+        g.appendChild(grp);
+      }
+    }
+
+    function paint() {
+      document.getElementById("thr").textContent = `thr ${THRESHOLD.toFixed(2)}`;
+      for (const grp of document.querySelectorAll(".seg")) {
+        const id = grp.dataset.id;
+        const m = model[id];
+        const box = grp.querySelector('[data-role="box"]');
+        const fault = grp.querySelector('[data-role="fault"]');
+        box.setAttribute("fill", heat(m ? m.anomaly_score : null));
+        box.classList.toggle("alerting", !!(m && m.alerting));
+        fault.textContent = m && m.fault_class ? `⚑ ${m.fault_class}` : "";
+      }
+      // operator annotation flags
+      const fg = document.getElementById("flags");
+      fg.innerHTML = "";
+      for (const s of TRACK) {
+        const a = annotations[s.id];
+        if (!a || a.label === "dismiss") continue;
+        const fx = s.x + s.w - 12, fy = s.y + 12;
+        const flag = el("g", { class: "flag" });
+        flag.appendChild(el("circle", { cx: fx, cy: fy, r: 9 }));
+        const t = el("text", { x: fx, y: fy + 3.5 });
+        t.textContent = "✎";
+        flag.appendChild(t);
+        const title = el("title", {});
+        title.textContent = `operator: ${a.label}${a.note ? " — " + a.note : ""}`;
+        flag.appendChild(title);
+        fg.appendChild(flag);
+      }
+    }
+
+    function select(id) {
+      selected = id;
+      const m = model[id], a = annotations[id];
+      document.getElementById("sel-title").innerHTML =
+        `Annotate <span class="seg-name">${id}</span>`;
+      const meta = document.getElementById("sel-meta");
+      meta.hidden = false;
+      meta.innerHTML = [
+        `model score: <b>${m ? Number(m.anomaly_score).toFixed(2) : "—"}</b>`
+          + (m && m.alerting ? " · <b style='color:var(--coral)'>ALERT</b>" : ""),
+        `model fault: <b>${m && m.fault_class ? m.fault_class : "none"}</b>`,
+        `operator: <b>${a ? a.label : "—"}</b>`,
+      ].join("<br>");
+
+      const fbox = document.getElementById("faults");
+      fbox.hidden = false; fbox.innerHTML = "";
+      for (const f of FAULTS) {
+        const b = document.createElement("button");
+        b.textContent = f; b.onclick = () => annotate(id, f);
+        fbox.appendChild(b);
+      }
+      const dismiss = document.createElement("button");
+      dismiss.textContent = "Dismiss (no fault)"; dismiss.className = "dismiss";
+      dismiss.onclick = () => annotate(id, "dismiss");
+      fbox.appendChild(dismiss);
+      document.getElementById("note").hidden = false;
+    }
+
+    async function annotate(location, fault) {
+      const note = document.getElementById("note").value.trim();
+      try {
+        const res = await fetch(`${BRIDGE}/annotate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ line: LINE, location, fault, note }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        // optimistic: show the flag immediately
+        annotations[location] = { label: fault, note, ts: new Date().toISOString() };
+        paint();
+        document.getElementById("note").value = "";
+        toast(`${location}: ${fault} → sent`);
+      } catch (e) {
+        toast(`Failed: ${e.message}`);
+      }
+    }
+
+    async function load() {
+      try {
+        const [tRes, aRes] = await Promise.all([
+          fetch(`${BRIDGE}/track`), fetch(`${BRIDGE}/annotations`),
+        ]);
+        const t = await tRes.json();
+        THRESHOLD = t.threshold ?? THRESHOLD;
+        for (const k in model) delete model[k];
+        for (const s of t.segments) model[s.location] = s;
+        const anns = await aRes.json();
+        for (const k in annotations) delete annotations[k];
+        for (const a of anns) annotations[a.location] = a;
+        paint();
+      } catch (e) {
+        document.getElementById("thr").textContent = "bridge unreachable";
+      }
+    }
+
+    buildTrack();
+    load();
+    setInterval(load, 2000);
+  </script>
+</body>
+</html>

@@ -16,7 +16,19 @@ from main import (
     parse_ts,
     should_open_alert,
     should_queue_retrain,
+    valid_track_fault,
 )
+
+
+def test_valid_track_fault_accepts_known_faults():
+    assert valid_track_fault("turn table")
+    assert valid_track_fault("bearing wear")
+    assert valid_track_fault("dismiss")
+
+
+def test_valid_track_fault_rejects_unknown():
+    assert not valid_track_fault("explode")
+    assert not valid_track_fault(None)
 
 
 @pytest.mark.parametrize(
