@@ -41,6 +41,7 @@
 #include "cy_secure_sockets.h"      // Secure Sockets (over lwIP); TLS unless -DNATS_DISABLE_TLS
 #include "mtb_hal.h"                // mtb_hal_sdio_t / mtb_hal_gpio_t used by WCM bring-up
 #include "lwip/ip_addr.h"           // ip4addr_ntoa() for logging the assigned IP
+#include "cyabs_rtos.h"             // cy_rtos_delay_milliseconds() for hal_sleep_ms
 
 // PSA persistent key id of the model-signing public key, provisioned into the
 // device's protected storage (RRAM-backed) at manufacturing. VERIFY: the id you
@@ -316,6 +317,10 @@ static bool app_sdio_init(void) {
     return true;
 }
 
+void hal_sleep_ms(uint32_t ms) {
+    cy_rtos_delay_milliseconds(ms);
+}
+
 bool hal_net_init(void) {
     if (!app_sdio_init()) {
         return false;
@@ -433,20 +438,33 @@ int hal_tcp_connect(const char *host, uint16_t port) {
     // DNS. ip.v4 is documented as network byte order: on the little-endian Cortex-M,
     // packing `a` in the low byte gives bytes [a,b,c,d].
     unsigned a, b, c, d;
+    printf("[net] connecting to %s:%u\n", host, (unsigned)port);
     if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
         addr.ip_address.ip.v4 = (uint32_t)(a | (b << 8) | (c << 16) | (d << 24));
-    } else if (cy_socket_gethostbyname(host, CY_SOCKET_IP_VER_V4,
-                                       &addr.ip_address) != CY_RSLT_SUCCESS) {
-        cy_socket_delete(g_sock);
-        return -1;  // unresolvable host
+    } else {
+        cy_rslt_t dr = cy_socket_gethostbyname(host, CY_SOCKET_IP_VER_V4, &addr.ip_address);
+        if (dr != CY_RSLT_SUCCESS) {
+            printf("[net] DNS resolve of '%s' FAILED rc=0x%08lx\n", host, (unsigned long)dr);
+            cy_socket_delete(g_sock);
+            return -1;  // unresolvable host
+        }
+    }
+    {
+        uint32_t v4 = addr.ip_address.ip.v4;  // network byte order: bytes [a,b,c,d]
+        printf("[net] resolved %s -> %u.%u.%u.%u\n", host,
+               (unsigned)(v4 & 0xff), (unsigned)((v4 >> 8) & 0xff),
+               (unsigned)((v4 >> 16) & 0xff), (unsigned)((v4 >> 24) & 0xff));
     }
 
     // For a TLS socket cy_socket_connect also runs the handshake, verifying the server
     // cert against the root CA pinned above before any NATS byte is exchanged.
-    if (cy_socket_connect(g_sock, &addr, sizeof(addr)) != CY_RSLT_SUCCESS) {
+    cy_rslt_t cr = cy_socket_connect(g_sock, &addr, sizeof(addr));
+    if (cr != CY_RSLT_SUCCESS) {
+        printf("[net] connect to %s:%u FAILED rc=0x%08lx\n", host, (unsigned)port, (unsigned long)cr);
         cy_socket_delete(g_sock);
         return -1;
     }
+    printf("[net] connected to %s:%u\n", host, (unsigned)port);
     g_sock_open = true;
     return 0;
 }
