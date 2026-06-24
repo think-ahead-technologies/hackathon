@@ -42,23 +42,24 @@ def _time_features(sig):
     }
 
 
-def _spectral_features(sig, fs):
-    n = len(sig)
-    win = np.hanning(n)
-    spec = np.abs(np.fft.rfft(sig * win)) ** 2
-    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+def spectral_shape(spec, freqs, fs):
+    """Spectral feature dict from a power spectrum on a frequency grid.
+
+    Shared by the contiguous-window path (one windowed FFT) and the burst-aware path
+    (per-burst spectra Welch-averaged onto a common grid) so both compute identical
+    band fractions, centroid, spread, flatness, entropy, roll-off and HF ratio.
+    """
+    spec = np.asarray(spec, dtype=np.float64)
+    freqs = np.asarray(freqs, dtype=np.float64)
     total = float(spec.sum()) + 1e-12
     nyq = fs / 2.0
 
     feats = {}
-    # band energy fractions across [0, Nyquist]
     edges = np.linspace(0.0, nyq, N_BANDS + 1)
     idx = np.digitize(freqs, edges) - 1
     for b in range(N_BANDS):
         feats[f"band{b}"] = float(spec[idx == b].sum() / total)
-    # high-frequency ratio (energy above Nyquist/2)
     feats["hf_ratio"] = float(spec[freqs >= nyq / 2.0].sum() / total)
-    # spectral centroid, spread, flatness, entropy, rolloff(85%)
     p = spec / total
     feats["centroid"] = float(np.sum(freqs * p))
     feats["spread"] = float(np.sqrt(np.sum(((freqs - feats["centroid"]) ** 2) * p)))
@@ -69,6 +70,14 @@ def _spectral_features(sig, fs):
     roll_idx = int(np.searchsorted(cum, 0.85))
     feats["rolloff"] = float(freqs[min(roll_idx, len(freqs) - 1)])
     return feats
+
+
+def _spectral_features(sig, fs):
+    n = len(sig)
+    win = np.hanning(n)
+    spec = np.abs(np.fft.rfft(sig * win)) ** 2
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    return spectral_shape(spec, freqs, fs)
 
 
 def _envelope_features(sig, fs):

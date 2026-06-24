@@ -33,13 +33,8 @@ def load_imu(session_dir):
     return t, accel, gyro
 
 
-def load_merged_csv(path):
-    """Return (t_wall, accel[N,3], gyro[N,3], fs) for a merged-recorder CSV.
-
-    t_wall is the host wall clock (t_rel_s) zeroed to the first sample — the timeline
-    to align against other modalities (audio / video) recorded in the same session.
-    fs is the nominal IMU ODR recovered from the device clock (see load_imu_csv).
-    """
+def _read_merged_csv(path):
+    """Parse a merged-recorder CSV -> (accel[N,3], gyro[N,3], t_dev_us[N], t_rel_s[N])."""
     acc, gyr, t_dev_us, t_rel_s = [], [], [], []
     with open(path) as fh:
         reader = csv.DictReader(fh)
@@ -48,12 +43,31 @@ def load_merged_csv(path):
             gyr.append([float(row[c]) for c in CSV_GYRO_COLS])
             t_dev_us.append(float(row["t_dev_us"]))
             t_rel_s.append(float(row["t_rel_s"]))
-    accel = np.asarray(acc, dtype=np.float64)
-    gyro = np.asarray(gyr, dtype=np.float64)
-    fs = _nominal_fs_from_dev_clock(np.asarray(t_dev_us, dtype=np.float64))
-    t_rel = np.asarray(t_rel_s, dtype=np.float64)
+    return (np.asarray(acc, dtype=np.float64), np.asarray(gyr, dtype=np.float64),
+            np.asarray(t_dev_us, dtype=np.float64), np.asarray(t_rel_s, dtype=np.float64))
+
+
+def load_merged_csv(path):
+    """Return (t_wall, accel[N,3], gyro[N,3], fs) for a merged-recorder CSV.
+
+    t_wall is the host wall clock (t_rel_s) zeroed to the first sample — the timeline
+    to align against other modalities (audio / video) recorded in the same session.
+    fs is the nominal IMU ODR recovered from the device clock (see load_imu_csv).
+    """
+    accel, gyro, t_dev_us, t_rel = _read_merged_csv(path)
+    fs = _nominal_fs_from_dev_clock(t_dev_us)
     t_wall = t_rel - t_rel[0]
     return t_wall, accel, gyro, fs
+
+
+def load_merged_csv_bursts(path):
+    """Return (t_wall, accel, gyro, fs, t_dev_us) — same as load_merged_csv plus the raw
+    device clock, which marks the high-rate bursts (it resets each burst). Burst-aware
+    spectral extraction needs this; the uniform t from load_imu_csv would hide the gaps."""
+    accel, gyro, t_dev_us, t_rel = _read_merged_csv(path)
+    fs = _nominal_fs_from_dev_clock(t_dev_us)
+    t_wall = t_rel - t_rel[0]
+    return t_wall, accel, gyro, fs, t_dev_us
 
 
 def load_imu_csv(path):

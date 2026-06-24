@@ -39,6 +39,10 @@ architected so the 3200 Hz upgrade pays off with **no code change**.
   `host_us = 1e6·t_rel + origin`, so each acoustic anomaly maps to the nearest camera frame on one
   shared clock. `python -m wear_detector.frames data/test1/anomaly_frames` prints the table and
   extracts the matched frames — ground-truth on *what the machine was doing* at each anomaly.
+- `burst_features.py` — **per-segment spectral extractor** for high-rate IMU. The 1600 Hz stream is
+  delivered as a few contiguous capture segments (the device clock resets between them); this Welch-
+  averages FFTs *within* each segment and pools across, so the spectrum never smears across a gap.
+  `burst_spectral_features` shares `features.spectral_shape`'s keys — a drop-in for the spectral subset.
 - `motion_gate.py` — **motion gate**: only assess wear while the unit is actually moving. The carrier
   rotates through the line under power (tens of dps of yaw) while a parked or hand-held unit sits near
   zero, so gating each anomaly on the gyro energy at its peak instant drops handling/parked artifacts.
@@ -184,8 +188,17 @@ designed. The acoustic + motion-gate + camera pipeline runs on it unchanged (`fr
 reads a directory, e.g. a 7z extracted with `bsdtar`): 6 acoustic events, the motion gate drops 1
 (a person at the rig, confirmed in-frame), the other 5 are in-transit drive-wheel/roller pass-bys.
 
-**Caveat before trusting the IMU spectral path on test2:** 1600 Hz is the *intra-burst* rate. The
-recorder delivers ~22-sample bursts at ~9 bursts/s (~100 ms gaps), so the *effective* rate is ~166 Hz
-and ~90% of samples are missing. Concatenating bursts (what the current contiguous-sampling front-end
-does) smears the FFT across the gaps. To actually exploit 1600 Hz, the feature extractor should run
-per burst (a 22-sample STFT reaches the 800 Hz band cleanly) rather than over a glued 4 s window.
+**How test2 is actually sampled (and the per-segment extractor).** The device clock `t_dev_us` steps
+a uniform 625 µs and only resets 7 times, so the recording is **7 contiguous 1600 Hz capture segments**
+(0.6–8.3 s each, ~26 s of device time); the bursty host `t_rel` is just slow USB drain of the buffer,
+not signal gaps. The signal is therefore contiguous *within* a segment but has real time gaps *between*
+segments. `burst_features.py` is the right front-end: it finds the segments (`split_bursts`), Welch-
+averages overlapping FFTs *within* each (no FFT across a boundary), and pools across segments —
+`burst_spectral_features` returns the same keys as `features.spectral_shape`, so it's a drop-in.
+`python -m wear_detector.burst_features <csv>` prints the per-segment summary.
+
+Two honest results on test2: (1) because there are only 7 segments (6 boundaries in 41 k samples), a
+naive glued FFT is barely smeared here — burst-aware ≈ glued (centroid 112 vs 118 Hz); the per-segment
+method matters more when captures are short/many. (2) Even with correct 1600 Hz extraction the IMU
+energy is **low-band** (centroid ~110 Hz, ~4% above 400 Hz), so in test2 the discriminative fault
+signal is in the 16 kHz **audio**, not the IMU high bands.
