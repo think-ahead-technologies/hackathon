@@ -50,12 +50,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy scipy pytest
       # test_dataset.py needs the IMU recordings (not committed); the TF tests
-      # self-skip via importorskip; one vela test reads a sibling-layout path.
+      # self-skip via importorskip when tensorflow is absent.
       - name: Run tests
         run: |
           python -m pytest -q wear_detector/tests \
-            --ignore=wear_detector/tests/test_dataset.py \
-            --deselect "wear_detector/tests/test_vela_compile.py::test_normalized_row_satisfies_gate_schema"
+            --ignore=wear_detector/tests/test_dataset.py
 
   firmware:
     name: firmware
@@ -70,15 +69,12 @@ jobs:
         run: pip install cryptography
       - name: Unit tests (host logic)
         run: make -C firmware test
-      # The cross-tests import the Platform-side framer/provisioning from pipeline/.
+      # These import the Platform-side framer/provisioning from pipeline/ via a
+      # repo-relative sys.path, so no PYTHONPATH is needed.
       - name: Cross-language wire-format test
         run: make -C firmware crosslang
-        env:
-          PYTHONPATH: ${{ github.workspace }}/pipeline
       - name: Live NATS nkey-login test
         run: make -C firmware nats-login
-        env:
-          PYTHONPATH: ${{ github.workspace }}/pipeline
 
   vector:
     name: vector policy

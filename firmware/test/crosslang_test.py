@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 # Import the Platform-side framer (pure stdlib; no deps).
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "dashboard", "pipeline"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "pipeline"))
 from deploy_frame import build_frames  # noqa: E402
 
 # A realistic Contract A manifest (matches the pipeline schema) with a known sha256.

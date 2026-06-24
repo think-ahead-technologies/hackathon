@@ -10,7 +10,7 @@ import tempfile
 import time
 
 # Reuse the dashboard's real provisioning + nkey codec (also validates them across the boundary).
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "dashboard", "pipeline"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "pipeline"))
 import nkey  # noqa: E402
 import provision  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402

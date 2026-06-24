@@ -36,7 +36,7 @@ def test_normalized_row_satisfies_gate_schema():
     import json
     import os
     policy = json.load(open(os.path.join(os.path.dirname(vc.__file__),
-                                         "..", "..", "dashboard", "pipeline", "vela.policy.json")))
+                                         "..", "..", "pipeline", "vela.policy.json")))
     norm = vc.normalize_row({"sram_memory_used": "1", "off_chip_flash_memory_used": "1",
                              "inference_time": "1e-3", "cycles_npu": "1", "cycles_total": "1"},
                             cpu_ops=0, npu_ops=1)
