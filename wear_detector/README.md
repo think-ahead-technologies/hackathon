@@ -171,9 +171,21 @@ uniform across positions → correct **onboard** verdict. `emit_contract_b.py` e
 No track fault exists in the data, so the high-contrast "track" verdict is shown only via the
 validation signal.
 
-## When 3200 Hz data lands
+## When higher-fs data lands
 
-No code change needed: drop the new sessions into `thinkathon_kickstart/data/`, point `evaluate.py`
-at them. The window sizer and feature profile switch on the inferred fs; the spectral/envelope/
-`crest`/`kurtosis` features that were dead at 50 Hz should now carry the bearing signature — the
-test of whether per-window (non-dwell) detection becomes strong.
+No code change needed: point the loaders at the new recording. The window sizer and feature profile
+switch on the inferred fs; the spectral/envelope/`crest`/`kurtosis` features that were dead at 50 Hz
+now carry the bearing signature.
+
+`data/test2` (`merged_1600hz`) is the first taste: the IMU steps at 625 µs (**1600 Hz nominal**,
+Nyquist 800 Hz), and `detector_feature_names(1600)` automatically expands from 9 energy features to
+**28** — the spectral bands, centroid, roll-off, HF ratio and kurtosis all switch on, exactly as
+designed. The acoustic + motion-gate + camera pipeline runs on it unchanged (`frames.py` now also
+reads a directory, e.g. a 7z extracted with `bsdtar`): 6 acoustic events, the motion gate drops 1
+(a person at the rig, confirmed in-frame), the other 5 are in-transit drive-wheel/roller pass-bys.
+
+**Caveat before trusting the IMU spectral path on test2:** 1600 Hz is the *intra-burst* rate. The
+recorder delivers ~22-sample bursts at ~9 bursts/s (~100 ms gaps), so the *effective* rate is ~166 Hz
+and ~90% of samples are missing. Concatenating bursts (what the current contiguous-sampling front-end
+does) smears the FFT across the gaps. To actually exploit 1600 Hz, the feature extractor should run
+per burst (a 22-sample STFT reaches the 800 Hz band cleanly) rather than over a glued 4 s window.

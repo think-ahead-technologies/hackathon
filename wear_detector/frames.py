@@ -22,12 +22,27 @@ DEFAULT_CSV = os.path.join(DATA, "test1", "merged_20260623_17xx.csv")
 DEFAULT_WAV = os.path.join(DATA, "test1", "merged_20260623_17xx.wav")
 
 
-def parse_frame_index(zip_path):
-    """Return [(frame_no, host_us, name), ...] sorted by host_us, from a frames zip."""
-    with zipfile.ZipFile(zip_path) as z:
-        names = [n for n in z.namelist() if n.endswith(".jpg")]
+def _frame_names(source):
+    """List of .jpg member names in a frames zip or a directory (recursive)."""
+    if os.path.isdir(source):
+        names = []
+        for root, _dirs, files in os.walk(source):
+            for f in files:
+                if f.endswith(".jpg"):
+                    names.append(os.path.relpath(os.path.join(root, f), source))
+        return names
+    with zipfile.ZipFile(source) as z:
+        return [n for n in z.namelist() if n.endswith(".jpg")]
+
+
+def parse_frame_index(source):
+    """Return [(frame_no, host_us, name), ...] sorted by host_us.
+
+    `source` is a frames zip or a directory of frames (e.g. a 7z extracted with bsdtar);
+    names are relative to it so extract_frames can resolve them back either way.
+    """
     out = []
-    for n in names:
+    for n in _frame_names(source):
         m = _FRAME_RX.search(n)
         if m:
             out.append((int(m.group(1)), int(m.group(2)), n))
@@ -73,11 +88,21 @@ def correlate_events(frames, origin_us, event_times_audio):
     return out
 
 
-def extract_frames(zip_path, names, out_dir):
-    """Extract the named frames (flat, by basename) into out_dir; return written paths."""
+def extract_frames(source, names, out_dir):
+    """Extract the named frames (flat, by basename) into out_dir; return written paths.
+
+    `source` is a frames zip or a directory (same forms parse_frame_index accepts).
+    """
     os.makedirs(out_dir, exist_ok=True)
     paths = []
-    with zipfile.ZipFile(zip_path) as z:
+    if os.path.isdir(source):
+        import shutil
+        for n in names:
+            dst = os.path.join(out_dir, os.path.basename(n))
+            shutil.copyfile(os.path.join(source, n), dst)
+            paths.append(dst)
+        return paths
+    with zipfile.ZipFile(source) as z:
         for n in names:
             dst = os.path.join(out_dir, os.path.basename(n))
             with open(dst, "wb") as fh:
@@ -141,5 +166,12 @@ def main(zip_path=DEFAULT_ZIP, csv_path=DEFAULT_CSV, wav_path=DEFAULT_WAV, out_d
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else None
-    main(out_dir=out)
+    import argparse
+    p = argparse.ArgumentParser(description="Correlate acoustic anomalies to camera frames.")
+    p.add_argument("--frames", default=DEFAULT_ZIP, help="frames zip or directory")
+    p.add_argument("--csv", default=DEFAULT_CSV, help="merged IMU CSV (clock + motion gate)")
+    p.add_argument("--wav", default=DEFAULT_WAV, help="audio recording")
+    p.add_argument("--out", default=None, help="directory to extract matched frames into")
+    p.add_argument("--no-gate", action="store_true", help="disable the motion gate")
+    a = p.parse_args()
+    main(zip_path=a.frames, csv_path=a.csv, wav_path=a.wav, out_dir=a.out, gate=not a.no_gate)

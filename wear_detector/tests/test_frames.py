@@ -66,3 +66,28 @@ def test_extract_frames_writes_files(tmp_path):
     assert len(paths) == 1
     assert paths[0].endswith(".jpg")
     assert (out / "merged_x_f000010_1000.jpg").exists()
+
+
+def _make_dir(path, stamps):
+    """A directory of frames (like an extracted 7z), with a nested subfolder."""
+    sub = path / "merged_x_frames"
+    sub.mkdir(parents=True)
+    for fn, us in stamps:
+        (sub / f"merged_x_f{fn:06d}_{us}.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    return str(path)
+
+
+def test_parse_frame_index_accepts_a_directory(tmp_path):
+    d = _make_dir(tmp_path / "frames", [(12, 2_000), (10, 1_000), (11, 1_500)])
+    idx = frames.parse_frame_index(d)
+    assert [f[0] for f in idx] == [10, 11, 12]        # recursive scan, sorted by time
+    assert [f[1] for f in idx] == [1_000, 1_500, 2_000]
+
+
+def test_extract_frames_from_directory_copies(tmp_path):
+    d = _make_dir(tmp_path / "frames", [(10, 1_000), (11, 2_000)])
+    idx = frames.parse_frame_index(d)
+    out = tmp_path / "out"
+    paths = frames.extract_frames(d, [idx[1][2]], str(out))
+    assert len(paths) == 1
+    assert (out / "merged_x_f000011_2000.jpg").exists()
