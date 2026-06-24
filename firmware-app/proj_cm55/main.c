@@ -40,6 +40,7 @@
 #include "features.h"
 #include "score.h"
 #include "shared_score.h"
+#include "imu.h"
 
 /*******************************************************************************
  * Macros
@@ -143,16 +144,23 @@ static void cm55_task(void * arg)
 
     SHARED_SCORE->magic = 0;   /* not ready yet */
 
-    if (!npu_infer_init())
+    if (!npu_infer_init() || !imu_init())
     {
-        for (;;) { vTaskSuspend(NULL); }   /* NPU bring-up failed */
+        for (;;) { vTaskSuspend(NULL); }   /* NPU or IMU bring-up failed */
     }
 
-    static float accel_window[FEAT_WINDOW_SAMPLES * 3]; /* TODO(imu): fill from I2C IMU @ 50 Hz */
+    static float accel_window[FEAT_WINDOW_SAMPLES * 3];
     static int8_t features[FEAT_OUT_LEN];
     static dwell_t dwell;                                /* zero-initialized */
     for (;;)
     {
+        /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. */
+        for (int i = 0; i < FEAT_WINDOW_SAMPLES; i++)
+        {
+            imu_read_accel_ms2(&accel_window[i * 3]);
+            vTaskDelay(pdMS_TO_TICKS(20));   /* ~50 Hz (FEAT_FS) */
+        }
+
         /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
         features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
         float score = npu_infer(features, FEAT_OUT_LEN);
