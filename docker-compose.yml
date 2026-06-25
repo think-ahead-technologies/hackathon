@@ -80,6 +80,20 @@ services:
       nats:
         condition: service_healthy
 
+  # Joins the on-device anomaly score (edge.anomaly) with the localizer's floor-map fix
+  # (edge.position) and publishes the located alert to edge.localized-anomaly.<line>.<container>.
+  # Last-known-position join; classified "inference" so it crosses the Vector boundary.
+  anomaly-localizer:
+    build: ./anomaly-localizer
+    environment:
+      NATS_URL: nats://nats:4222
+      ANOMALY_SUBJECT: edge.anomaly.*.*
+      POSITION_SUBJECT: edge.position.*.*
+      OUT_PREFIX: edge.localized-anomaly
+    depends_on:
+      nats:
+        condition: service_healthy
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.154.0
     command: ["--config=/etc/otelcol/config.yaml"]
