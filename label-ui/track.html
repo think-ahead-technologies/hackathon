@@ -77,6 +77,24 @@
       font-size: 14px; opacity: 0; transition: opacity .2s ease; pointer-events: none;
     }
     .toast.show { opacity: 1; }
+
+    .cam { margin: 16px 0 0; }
+    .cam-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      font-size: 12px; color: #8b909c; margin: 0 0 6px;
+    }
+    .cam-status { font-weight: 600; }
+    .cam-status.live { color: var(--teal); }
+    .cam-status.down { color: var(--coral); }
+    .cam-frame {
+      position: relative; background: #000; border: 1px solid #2c2f38;
+      border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3;
+    }
+    .cam-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .cam-empty {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #8b909c; font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -96,6 +114,16 @@
           healthy
           <div class="grad"></div>
           fault · <span id="thr">thr —</span>
+        </div>
+        <div class="cam">
+          <div class="cam-head">
+            <span>Live camera</span>
+            <span id="cam-status" class="cam-status">connecting…</span>
+          </div>
+          <div class="cam-frame">
+            <img id="cam-img" alt="live camera stream" />
+            <div id="cam-empty" class="cam-empty">waiting for frames…</div>
+          </div>
         </div>
       </div>
       <div class="panel">
@@ -357,8 +385,39 @@
       }
     }
 
+    // Live camera: point the <img> at the bridge MJPEG stream (edge.camera via NATS).
+    // If the stream errors (no frames / bridge down), fall back to snapshot polling.
+    function startCamera() {
+      const img = document.getElementById("cam-img");
+      const status = document.getElementById("cam-status");
+      const empty = document.getElementById("cam-empty");
+      let pollTimer = null;
+
+      const setStatus = (txt, cls) => { status.textContent = txt; status.className = "cam-status " + (cls || ""); };
+
+      img.onload = () => { empty.style.display = "none"; setStatus("live", "live"); };
+      img.onerror = () => {
+        setStatus("reconnecting…", "down");
+        // MJPEG dropped — retry via snapshot poll until frames return.
+        if (!pollTimer) {
+          pollTimer = setInterval(() => {
+            fetch(`${BRIDGE}/camera/snapshot?line=${encodeURIComponent(LINE)}&_=${performance.now()}`)
+              .then(r => { if (r.ok) { clearInterval(pollTimer); pollTimer = null; connect(); } })
+              .catch(() => {});
+          }, 2000);
+        }
+      };
+
+      function connect() {
+        setStatus("connecting…");
+        img.src = `${BRIDGE}/camera/stream?line=${encodeURIComponent(LINE)}&_=${performance.now()}`;
+      }
+      connect();
+    }
+
     buildTrack();
     load();
+    startCamera();
     setInterval(load, 2000);
   </script>
 </body>

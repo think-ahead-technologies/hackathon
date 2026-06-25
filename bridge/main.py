@@ -2,6 +2,7 @@
 # ABOUTME: Also serves POST /label (label-ui -> NATS) and a /metrics endpoint for Prometheus.
 
 import asyncio
+import base64
 import json
 import os
 import signal
@@ -31,6 +32,8 @@ STREAM_NAME = os.environ.get("STREAM_NAME", "EDGE")
 RETRAIN_AFTER_LABELS = int(os.environ.get("RETRAIN_AFTER_LABELS", "1"))
 # The device that traverses the track and runs capture; capture commands target its subject.
 CAPTURE_DEVICE = os.environ.get("CAPTURE_DEVICE", "cnc-7")
+# Per-frame camera topic (Contract: edge.camera.<line>.<container>, base64 JPEG per msg).
+CAMERA_SUBJECT = os.environ.get("CAMERA_SUBJECT", "edge.camera.*.*")
 
 VALID_LABELS = {"bearing wear", "imbalance", "dismiss"}
 
@@ -220,6 +223,45 @@ async def handle_capture(pool: asyncpg.Pool, msg: dict) -> None:
             msg.get("request_id"), msg.get("container_id"), msg.get("label"),
             msg.get("segment"), msg.get("seq"), msg["features_b64"],
         )
+
+
+# --- camera frames (edge.camera.<line>.<container> -> live MJPEG) ----------
+
+class FrameStore:
+    """Holds the most recent JPEG frame per line and wakes streamers on each new one."""
+
+    def __init__(self):
+        self._frames: dict[str, dict] = {}   # line -> {"jpeg": bytes, "meta": dict}
+        self._event = asyncio.Event()
+
+    def put(self, line: str, jpeg: bytes, meta: dict) -> None:
+        self._frames[line] = {"jpeg": jpeg, "meta": meta}
+        # Wake every waiter, then reset so the next frame can signal again.
+        self._event.set()
+        self._event.clear()
+
+    def latest(self, line: str):
+        return self._frames.get(line)
+
+    def lines(self):
+        return sorted(self._frames.keys())
+
+    async def wait(self) -> None:
+        await self._event.wait()
+
+
+def camera_line(subject: str) -> str:
+    """edge.camera.<line>.<container> -> <line>."""
+    parts = subject.split(".")
+    return parts[2] if len(parts) >= 4 else "line1"
+
+
+def decode_frame(data: bytes) -> tuple[bytes, dict]:
+    """Parse a camera message, return (raw jpeg bytes, lightweight meta). Raises on bad input."""
+    msg = json.loads(data)
+    jpeg = base64.b64decode(msg["data"])
+    meta = {k: msg.get(k) for k in ("frame_id", "width", "height", "t_us", "t_host_us")}
+    return jpeg, meta
 
 
 # --- HTTP (label-ui -> NATS, and Prometheus /metrics) ---------------------
@@ -464,6 +506,56 @@ async def metrics(request: web.Request) -> web.Response:
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
 
 
+async def get_camera_snapshot(request: web.Request) -> web.Response:
+    """Latest single JPEG frame for a line (cheap poll / fallback for the <img> stream)."""
+    line = request.query.get("line", "line1")
+    frame = request.app["frames"].latest(line)
+    if not frame:
+        return web.json_response({"error": f"no frames yet for {line}"}, status=404)
+    return web.Response(
+        body=frame["jpeg"],
+        content_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def get_camera_stream(request: web.Request) -> web.StreamResponse:
+    """Live MJPEG (multipart/x-mixed-replace) — point an <img src> straight at this."""
+    line = request.query.get("line", "line1")
+    store = request.app["frames"]
+    boundary = "frame"
+    resp = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": f"multipart/x-mixed-replace; boundary={boundary}",
+            "Cache-Control": "no-store",
+        },
+    )
+    await resp.prepare(request)
+    last_id = None
+    try:
+        while True:
+            frame = store.latest(line)
+            if frame and frame["meta"].get("frame_id") != last_id:
+                last_id = frame["meta"].get("frame_id")
+                jpeg = frame["jpeg"]
+                await resp.write(
+                    f"--{boundary}\r\nContent-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                    + jpeg
+                    + b"\r\n"
+                )
+            await store.wait()
+    except (asyncio.CancelledError, ConnectionResetError):
+        pass
+    return resp
+
+
+async def get_camera_lines(request: web.Request) -> web.Response:
+    """Lines that currently have a live frame (so the UI can pick one)."""
+    return web.json_response({"lines": request.app["frames"].lines()})
+
+
 # --- wiring ---------------------------------------------------------------
 
 @web.middleware
@@ -528,6 +620,7 @@ async def main() -> None:
     nc = await nats.connect(NATS_URL, reconnect_time_wait=2, max_reconnect_attempts=-1, **auth)
     js = nc.jetstream()
     await ensure_stream(js)
+    frames = FrameStore()
 
     async def on_inference(m):
         try:
@@ -570,16 +663,27 @@ async def main() -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[capture] dropped: {exc}", flush=True)
 
+    async def on_camera(m):
+        try:
+            jpeg, meta = decode_frame(m.data)
+        except Exception as exc:  # noqa: BLE001 — never kill the sub on one bad frame
+            print(f"[camera] dropped: {exc}", flush=True)
+            return
+        frames.put(camera_line(m.subject), jpeg, meta)
+
     await js.subscribe("inference.>", durable="bridge-inference", cb=on_inference)
     await js.subscribe("labels.>", durable="bridge-labels", cb=on_label)
     await js.subscribe("models.>", durable="bridge-models", cb=on_deploy)
     # Capture sink: core NATS (not JetStream) — high-volume training windows outside the EDGE stream.
     await nc.subscribe("capture.*.*.data", cb=on_capture)
-    print(f"[bridge] subscribed; THRESHOLD={THRESHOLD}", flush=True)
+    # Camera frames: core NATS, high-volume JPEG stream — kept in memory, not persisted.
+    await nc.subscribe(CAMERA_SUBJECT, cb=on_camera)
+    print(f"[bridge] subscribed; THRESHOLD={THRESHOLD}; camera={CAMERA_SUBJECT}", flush=True)
 
     app = web.Application(middlewares=[cors_middleware])
     app["pool"] = pool
     app["nc"] = nc
+    app["frames"] = frames
     app.router.add_post("/label", post_label)
     app.router.add_post("/deploy", post_deploy)
     app.router.add_post("/control", post_control)
@@ -589,6 +693,9 @@ async def main() -> None:
     app.router.add_get("/track", get_track)
     app.router.add_get("/annotations", get_annotations)
     app.router.add_get("/model_events", get_model_events)
+    app.router.add_get("/camera/stream", get_camera_stream)
+    app.router.add_get("/camera/snapshot", get_camera_snapshot)
+    app.router.add_get("/camera/lines", get_camera_lines)
     app.router.add_get("/metrics", metrics)
     app.router.add_get("/healthz", lambda r: web.json_response({"ok": True}))
     runner = web.AppRunner(app)

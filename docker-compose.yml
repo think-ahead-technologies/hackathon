@@ -37,6 +37,7 @@ services:
       PG_DSN: postgresql://postgres:postgres@timescale:5432/postgres
       THRESHOLD: "0.60"
       HTTP_PORT: "8000"
+      CAMERA_SUBJECT: edge.camera.*.*
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: bridge
     ports:
