@@ -51,7 +51,7 @@ feedback loop in miniature — which is the whole product.  *(Bob Ross "happy ac
 
 ### Slide 5 — The product: a loop that improves itself  (~75s)  · *figure: feedback-loop-concept.png*
 - **Detect on-device → operator confirms in the UI → model retrains/recalibrates → pushed back.** Gets sharper every shift; tunes to each site.
-- **Localisation** makes it actionable: "a fault — *there*, segment X" → a work order, and something the operator can actually confirm. (Without *where*, the loop has nothing to close on.)
+- **Localisation** makes it actionable: "a fault — *there*, segment X" → a work order the operator can confirm. Pinned to **~6 cm, non-accumulating** (camera counts the 15 cm-spaced wheels; re-anchors at every corner). (Without *where*, the loop has nothing to close on.)
 - Runs **on the device**; only a verdict leaves. (Production deploy path — signed, A/B-rollback, zero-trust — is built; *happy to go there in questions*.)
 
 **Notes:** THE money slide. This closes slide 3's honest gap: high recall + a human filter +
@@ -77,7 +77,7 @@ deployable operations system. End on the throughline.
 - **Severity:** signature grows with defect burden then saturates — a direction, not a counter (`fault-severity-trend.png`).
 - **Detectors don't interfere:** orthogonal signatures (`detector-crosstalk.png`); wobble needs per-unit recalibration (`wobble-recalibration.png`).
 - **On-device plan:** PSoC Edge E84 — features on the M55, optional neural net on Ethos-U55, connectivity on M33. Cheap detector = filter + average + threshold, no neural net needed for v1. See `NEXT_STEPS.md`.
-- **Localisation "how":** *(pending Johannes' upload — confirm method before claiming it as a differentiator; see open question below.)*
+- **Localisation "how" (a real differentiator):** hybrid odometry — the box's **camera counts the big servo wheels** (15 cm apart) in a small region-of-interest for drift-free distance; the **IMU** anchors the 90° turntable turns and rejects false wheels while stationary; the **known loop topology** snaps position to the exact turntable location at every corner (magnetometer recovers a missed turn). Beats pure IMU dead-reckoning (which drifts). Reproduced accuracy: **leave-one-wheel-out max 7.1 cm, RMS 2.7, 92% within 5 cm**, non-accumulating. *Caveat:* raw wheel detection is patchy on long legs — the few-cm figure is local precision + re-anchoring, not uniform everywhere.
 
 ### Figure index
 | slide | figure |
@@ -87,7 +87,7 @@ deployable operations system. End on the throughline.
 | 4 | audio-annotation-impact.png |
 | 5 | feedback-loop-concept.png |
 
-### Open question before the pitch
-Confirm with Johannes which method drives the localisation (the repo's committed contract
-says IMU dead-reckoning + magnetometer heading; he described video wheel-counting). Only
-claim the "how" we can substantiate. Producer code is being uploaded.
+### Note
+The localisation method is confirmed (camera wheel-counting + IMU anchoring, see Q&A
+backup). One housekeeping item: the committed `nats-topics/positinal-data/contract.md` is
+stale (says IMU dead-reckoning + magnetometer) — Johannes should update it to match the code.
