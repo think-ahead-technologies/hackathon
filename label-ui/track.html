@@ -64,6 +64,8 @@
     }
     .faults button:hover { border-color: var(--purple); filter: brightness(1.1); }
     .faults button.dismiss { color: #8b909c; }
+    .faults button.observe { border-color: var(--purple); color: var(--purple); }
+    .faults button.observe.on { background: var(--purple); color: var(--paper); }
     .note { width: 100%; margin: 12px 0 0; background: #1b1d23; color: var(--paper);
       border: 1px solid #3a3e49; border-radius: 8px; padding: 9px 11px; font-size: 13px; }
     .legend { display: flex; align-items: center; gap: 10px; margin: 14px 0 0; font-size: 12px; color: #8b909c; }
@@ -173,6 +175,7 @@
     let selected = null;
     const model = {};        // location -> {anomaly_score, fault_class, alerting, ts}
     const annotations = {};  // location -> {label, note, ts}
+    const observing = new Set();  // segments the device is actively observing (Contract E)
 
     function toast(msg) {
       const t = document.getElementById("toast");
@@ -278,6 +281,13 @@
 
       const fbox = document.getElementById("faults");
       fbox.hidden = false; fbox.innerHTML = "";
+      // Actively observe: tell the device to add this segment to its capture watch-set, so it
+      // records training windows whenever it drives on it (Contract E, clean baseline).
+      const obs = document.createElement("button");
+      obs.textContent = observing.has(id) ? "✓ Observing — stop" : "Actively observe";
+      obs.className = observing.has(id) ? "observe on" : "observe";
+      obs.onclick = () => observe(id);
+      fbox.appendChild(obs);
       for (const f of FAULTS) {
         const b = document.createElement("button");
         b.textContent = f; b.onclick = () => annotate(id, f);
@@ -288,6 +298,26 @@
       dismiss.onclick = () => annotate(id, "dismiss");
       fbox.appendChild(dismiss);
       document.getElementById("note").hidden = false;
+    }
+
+    // Send a Contract E capture package. Adding observes one segment; once observing, the
+    // button stops listening (the device clears its whole watch-set on a stop command).
+    async function observe(location) {
+      const stop = observing.has(location);
+      const body = stop ? { line: LINE, stop: true } : { line: LINE, segment: location, label: "healthy" };
+      try {
+        const res = await fetch(`${BRIDGE}/capture`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        if (stop) { observing.clear(); toast("stopped observing"); }
+        else { observing.add(location); toast(`${location}: observing → sent`); }
+        select(location);  // refresh the button label
+      } catch (e) {
+        toast(`Failed: ${e.message}`);
+      }
     }
 
     async function annotate(location, fault) {
