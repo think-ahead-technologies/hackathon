@@ -55,13 +55,27 @@ services:
         condition: service_started
 
   # Splits the raw device-frame topic (edge.raw.<line>.<container>) into the derived
-  # topics: edge.imu / edge.mag / edge.camera / edge.position. Pure NATS consumer.
+  # sensor topics: edge.imu / edge.mag / edge.camera. Pure NATS consumer.
+  # (edge.position is produced by the localizer, not here.)
   splitter:
     build: ./splitter
     environment:
       NATS_URL: nats://nats:4222
       RAW_SUBJECT: edge.raw.*.*
-      POS_WINDOW: "50"
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  # Localization pipeline as a streaming service: fuses the camera wheel-counter, gyro turntable
+  # anchors and magnetometer missed-turn recovery into edge.position.<line>.<container>.
+  localizer:
+    build: ./localizer
+    environment:
+      NATS_URL: nats://nats:4222
+      CAMERA_SUBJECT: edge.camera.*.*
+      IMU_SUBJECT: edge.imu.*.*
+      MAG_SUBJECT: edge.mag.*.*
+      START_TT: "BL"          # first turntable the box reaches (BR/BL/TL/TR); empty -> relative only
     depends_on:
       nats:
         condition: service_healthy

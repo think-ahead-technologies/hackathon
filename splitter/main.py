@@ -1,5 +1,6 @@
 # ABOUTME: Splitter — consumes the `raw` topic (edge.raw.<line>.<container>) and fans each
-# ABOUTME: IMULOG01 record out to the derived topics: imu-data, magnetometer-data, camera-data, positinal-data.
+# ABOUTME: IMULOG01 record out to the derived sensor topics: imu-data, magnetometer-data, camera-data.
+# ABOUTME: positinal-data is produced downstream by the `localizer` service (real fusion pipeline).
 
 import asyncio
 import base64
@@ -194,7 +195,6 @@ async def main() -> None:
     nc = await nats.connect(NATS_URL, reconnect_time_wait=2, max_reconnect_attempts=-1, **auth)
 
     cfg: dict = {}       # (line,container) -> {acc_range, gyr_range}
-    fusion: dict = {}    # (line,container) -> Fusion
 
     async def pub(kind, line, container, msg):
         await nc.publish(out_subject(kind, line, container), json.dumps(msg).encode())
@@ -235,13 +235,8 @@ async def main() -> None:
                 mag = mag_message(dec, t_host_us)
                 if mag is not None:
                     await pub("mag", line, container, mag)
-                f = fusion.get(key)
-                if f is None:
-                    f = fusion[key] = Fusion(line)
-                f._t_host = t_host_us
-                fix = f.update(dec)
-                if fix is not None:
-                    await pub("position", line, container, fix)
+                # position is NOT emitted here — the localizer service fuses camera+imu+mag into
+                # edge.position downstream (see localizer/main.py).
             elif rec_type == REC_CAMERA:
                 cam = camera_message(payload, t_host_us)
                 if cam is not None:
@@ -251,7 +246,7 @@ async def main() -> None:
             print(f"[splitter] dropped: {exc}", flush=True)
 
     await nc.subscribe(RAW_SUBJECT, cb=on_raw)
-    print(f"[splitter] {RAW_SUBJECT} -> edge.imu/mag/camera/position.<line>.<container>", flush=True)
+    print(f"[splitter] {RAW_SUBJECT} -> edge.imu/mag/camera.<line>.<container>", flush=True)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
