@@ -1,0 +1,989 @@
+{
+  "meta": {
+    "units": "cm",
+    "topology": "figure8_theta (two stacked loops sharing a middle bar)",
+    "segment_types": {
+      "straight2": {
+        "length_cm": 60.0,
+        "wheels": 4
+      },
+      "straight4": {
+        "length_cm": 120.0,
+        "wheels": 8
+      },
+      "turn": {
+        "length_cm": 0.0,
+        "wheels": 0,
+        "is_turntable": true,
+        "travel_during_turn": false,
+        "rotation_deg": 90.0
+      }
+    },
+    "wheel_period_s": 0.455,
+    "n_pieces": 23,
+    "n_turntables": 6,
+    "total_big_wheels": 80,
+    "total_straight_length_cm": 1200.0,
+    "middle_switch_turntables": [
+      "TT_ML",
+      "TT_MR"
+    ],
+    "crossover_note": "TT_ML and TT_MR are the middle turntables. Each is externally controlled (we have NO access): it either stays put -> the box passes STRAIGHT (vertical, upper-side <-> lower-side, 0 deg) or it rotates -> the box is SWITCHED onto the shared middle bar (90 deg). Which one happened is OBSERVED from the IMU yaw at that node (rotation present = switch). The corner turntables always rotate 90 deg. The box does not travel during any turntable (length_cm = 0).",
+    "grid_units": "y in 60cm-units, downward; straight4 spans 2 units",
+    "imu": {
+      "source": "../merged_20260623_17xx.csv",
+      "yaw_channel": "gyr_z_dps",
+      "time_channel_s": "t_rel_s",
+      "note": "IMU ODR changes mid-recording -> integrate with real per-sample dt from t_rel_s/t_host_us, never a fixed rate."
+    }
+  },
+  "pieces": {
+    "TT_TL": {
+      "id": "TT_TL",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        0,
+        0.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": false,
+      "transitions": [
+        {
+          "mode": "turn",
+          "between": [
+            "U_TOP1",
+            "U_LFT"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": 90.0
+    },
+    "TT_TR": {
+      "id": "TT_TR",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        3,
+        0.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": false,
+      "transitions": [
+        {
+          "mode": "turn",
+          "between": [
+            "U_TOP2",
+            "U_RGT"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": 90.0
+    },
+    "TT_ML": {
+      "id": "TT_ML",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        0,
+        2.5
+      ],
+      "loops": [
+        "upper",
+        "lower"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": true,
+      "transitions": [
+        {
+          "mode": "straight",
+          "between": [
+            "U_LFT",
+            "L_L1"
+          ],
+          "rotation_deg": 0
+        },
+        {
+          "mode": "switch",
+          "between": [
+            "M_BAR1",
+            "U_LFT"
+          ],
+          "rotation_deg": 90
+        },
+        {
+          "mode": "switch",
+          "between": [
+            "M_BAR1",
+            "L_L1"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": "0 (straight) or 90 (switch)"
+    },
+    "TT_MR": {
+      "id": "TT_MR",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        3,
+        2.5
+      ],
+      "loops": [
+        "upper",
+        "lower"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": true,
+      "transitions": [
+        {
+          "mode": "straight",
+          "between": [
+            "U_RGT",
+            "L_R1"
+          ],
+          "rotation_deg": 0
+        },
+        {
+          "mode": "switch",
+          "between": [
+            "M_BAR2",
+            "U_RGT"
+          ],
+          "rotation_deg": 90
+        },
+        {
+          "mode": "switch",
+          "between": [
+            "M_BAR2",
+            "L_R1"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": "0 (straight) or 90 (switch)"
+    },
+    "TT_BL": {
+      "id": "TT_BL",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        0,
+        9.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": false,
+      "transitions": [
+        {
+          "mode": "turn",
+          "between": [
+            "L_BOT1",
+            "L_L4"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": 90.0
+    },
+    "TT_BR": {
+      "id": "TT_BR",
+      "type": "turn",
+      "length_cm": 0.0,
+      "wheels": 0,
+      "grid": [
+        3,
+        9.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": true,
+      "is_middle_switch": false,
+      "transitions": [
+        {
+          "mode": "turn",
+          "between": [
+            "L_BOT2",
+            "L_R5"
+          ],
+          "rotation_deg": 90
+        }
+      ],
+      "rotation_deg": 90.0
+    },
+    "U_TOP1": {
+      "id": "U_TOP1",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        1,
+        0.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": false
+    },
+    "U_TOP2": {
+      "id": "U_TOP2",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        2,
+        0.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": false
+    },
+    "U_LFT": {
+      "id": "U_LFT",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        0,
+        1.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": false
+    },
+    "U_RGT": {
+      "id": "U_RGT",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        3,
+        1.5
+      ],
+      "loops": [
+        "upper"
+      ],
+      "is_turntable": false
+    },
+    "M_BAR1": {
+      "id": "M_BAR1",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        1,
+        2.5
+      ],
+      "loops": [
+        "upper",
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "M_BAR2": {
+      "id": "M_BAR2",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        2,
+        2.5
+      ],
+      "loops": [
+        "upper",
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_R1": {
+      "id": "L_R1",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        3,
+        3.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_R2": {
+      "id": "L_R2",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        3,
+        4.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_R3": {
+      "id": "L_R3",
+      "type": "straight4",
+      "length_cm": 120.0,
+      "wheels": 8,
+      "grid": [
+        3,
+        6.0
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_R4": {
+      "id": "L_R4",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        3,
+        7.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_R5": {
+      "id": "L_R5",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        3,
+        8.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_BOT1": {
+      "id": "L_BOT1",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        1,
+        9.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_BOT2": {
+      "id": "L_BOT2",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        2,
+        9.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_L1": {
+      "id": "L_L1",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        0,
+        3.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_L2": {
+      "id": "L_L2",
+      "type": "straight2",
+      "length_cm": 60.0,
+      "wheels": 4,
+      "grid": [
+        0,
+        4.5
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_L3": {
+      "id": "L_L3",
+      "type": "straight4",
+      "length_cm": 120.0,
+      "wheels": 8,
+      "grid": [
+        0,
+        6.0
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    },
+    "L_L4": {
+      "id": "L_L4",
+      "type": "straight4",
+      "length_cm": 120.0,
+      "wheels": 8,
+      "grid": [
+        0,
+        8.0
+      ],
+      "loops": [
+        "lower"
+      ],
+      "is_turntable": false
+    }
+  },
+  "connections": [
+    {
+      "a": "L_BOT1",
+      "b": "L_BOT2"
+    },
+    {
+      "a": "L_BOT1",
+      "b": "TT_BL"
+    },
+    {
+      "a": "L_BOT2",
+      "b": "TT_BR"
+    },
+    {
+      "a": "L_L1",
+      "b": "L_L2"
+    },
+    {
+      "a": "L_L1",
+      "b": "TT_ML"
+    },
+    {
+      "a": "L_L2",
+      "b": "L_L3"
+    },
+    {
+      "a": "L_L3",
+      "b": "L_L4"
+    },
+    {
+      "a": "L_L4",
+      "b": "TT_BL"
+    },
+    {
+      "a": "L_R1",
+      "b": "L_R2"
+    },
+    {
+      "a": "L_R1",
+      "b": "TT_MR"
+    },
+    {
+      "a": "L_R2",
+      "b": "L_R3"
+    },
+    {
+      "a": "L_R3",
+      "b": "L_R4"
+    },
+    {
+      "a": "L_R4",
+      "b": "L_R5"
+    },
+    {
+      "a": "L_R5",
+      "b": "TT_BR"
+    },
+    {
+      "a": "M_BAR1",
+      "b": "M_BAR2"
+    },
+    {
+      "a": "M_BAR1",
+      "b": "TT_ML"
+    },
+    {
+      "a": "M_BAR2",
+      "b": "TT_MR"
+    },
+    {
+      "a": "TT_ML",
+      "b": "U_LFT"
+    },
+    {
+      "a": "TT_MR",
+      "b": "U_RGT"
+    },
+    {
+      "a": "TT_TL",
+      "b": "U_LFT"
+    },
+    {
+      "a": "TT_TL",
+      "b": "U_TOP1"
+    },
+    {
+      "a": "TT_TR",
+      "b": "U_RGT"
+    },
+    {
+      "a": "TT_TR",
+      "b": "U_TOP2"
+    },
+    {
+      "a": "U_TOP1",
+      "b": "U_TOP2"
+    }
+  ],
+  "points": [
+    {
+      "id": "P00",
+      "between": [
+        "L_BOT1",
+        "L_BOT2"
+      ]
+    },
+    {
+      "id": "P01",
+      "between": [
+        "L_BOT1",
+        "TT_BL"
+      ]
+    },
+    {
+      "id": "P02",
+      "between": [
+        "L_BOT2",
+        "TT_BR"
+      ]
+    },
+    {
+      "id": "P03",
+      "between": [
+        "L_L1",
+        "L_L2"
+      ]
+    },
+    {
+      "id": "P04",
+      "between": [
+        "L_L1",
+        "TT_ML"
+      ]
+    },
+    {
+      "id": "P05",
+      "between": [
+        "L_L2",
+        "L_L3"
+      ]
+    },
+    {
+      "id": "P06",
+      "between": [
+        "L_L3",
+        "L_L4"
+      ]
+    },
+    {
+      "id": "P07",
+      "between": [
+        "L_L4",
+        "TT_BL"
+      ]
+    },
+    {
+      "id": "P08",
+      "between": [
+        "L_R1",
+        "L_R2"
+      ]
+    },
+    {
+      "id": "P09",
+      "between": [
+        "L_R1",
+        "TT_MR"
+      ]
+    },
+    {
+      "id": "P10",
+      "between": [
+        "L_R2",
+        "L_R3"
+      ]
+    },
+    {
+      "id": "P11",
+      "between": [
+        "L_R3",
+        "L_R4"
+      ]
+    },
+    {
+      "id": "P12",
+      "between": [
+        "L_R4",
+        "L_R5"
+      ]
+    },
+    {
+      "id": "P13",
+      "between": [
+        "L_R5",
+        "TT_BR"
+      ]
+    },
+    {
+      "id": "P14",
+      "between": [
+        "M_BAR1",
+        "M_BAR2"
+      ]
+    },
+    {
+      "id": "P15",
+      "between": [
+        "M_BAR1",
+        "TT_ML"
+      ]
+    },
+    {
+      "id": "P16",
+      "between": [
+        "M_BAR2",
+        "TT_MR"
+      ]
+    },
+    {
+      "id": "P17",
+      "between": [
+        "TT_ML",
+        "U_LFT"
+      ]
+    },
+    {
+      "id": "P18",
+      "between": [
+        "TT_MR",
+        "U_RGT"
+      ]
+    },
+    {
+      "id": "P19",
+      "between": [
+        "TT_TL",
+        "U_LFT"
+      ]
+    },
+    {
+      "id": "P20",
+      "between": [
+        "TT_TL",
+        "U_TOP1"
+      ]
+    },
+    {
+      "id": "P21",
+      "between": [
+        "TT_TR",
+        "U_RGT"
+      ]
+    },
+    {
+      "id": "P22",
+      "between": [
+        "TT_TR",
+        "U_TOP2"
+      ]
+    },
+    {
+      "id": "P23",
+      "between": [
+        "U_TOP1",
+        "U_TOP2"
+      ]
+    }
+  ],
+  "shared_pieces": [
+    "TT_ML",
+    "TT_MR",
+    "M_BAR1",
+    "M_BAR2"
+  ],
+  "loops": {
+    "upper": {
+      "order": [
+        "TT_TL",
+        "U_TOP1",
+        "U_TOP2",
+        "TT_TR",
+        "U_RGT",
+        "TT_MR",
+        "M_BAR2",
+        "M_BAR1",
+        "TT_ML",
+        "U_LFT"
+      ],
+      "length_cm": 360.0,
+      "wheels": 24,
+      "ring": [
+        {
+          "piece": "TT_TL",
+          "point_in": "J:U_LFT->TT_TL",
+          "point_out": "J:TT_TL->U_TOP1",
+          "cum_cm_start": 0.0,
+          "cum_wheels_start": 0
+        },
+        {
+          "piece": "U_TOP1",
+          "point_in": "J:TT_TL->U_TOP1",
+          "point_out": "J:U_TOP1->U_TOP2",
+          "cum_cm_start": 0.0,
+          "cum_wheels_start": 0
+        },
+        {
+          "piece": "U_TOP2",
+          "point_in": "J:U_TOP1->U_TOP2",
+          "point_out": "J:U_TOP2->TT_TR",
+          "cum_cm_start": 60.0,
+          "cum_wheels_start": 4
+        },
+        {
+          "piece": "TT_TR",
+          "point_in": "J:U_TOP2->TT_TR",
+          "point_out": "J:TT_TR->U_RGT",
+          "cum_cm_start": 120.0,
+          "cum_wheels_start": 8
+        },
+        {
+          "piece": "U_RGT",
+          "point_in": "J:TT_TR->U_RGT",
+          "point_out": "J:U_RGT->TT_MR",
+          "cum_cm_start": 120.0,
+          "cum_wheels_start": 8
+        },
+        {
+          "piece": "TT_MR",
+          "point_in": "J:U_RGT->TT_MR",
+          "point_out": "J:TT_MR->M_BAR2",
+          "cum_cm_start": 180.0,
+          "cum_wheels_start": 12
+        },
+        {
+          "piece": "M_BAR2",
+          "point_in": "J:TT_MR->M_BAR2",
+          "point_out": "J:M_BAR2->M_BAR1",
+          "cum_cm_start": 180.0,
+          "cum_wheels_start": 12
+        },
+        {
+          "piece": "M_BAR1",
+          "point_in": "J:M_BAR2->M_BAR1",
+          "point_out": "J:M_BAR1->TT_ML",
+          "cum_cm_start": 240.0,
+          "cum_wheels_start": 16
+        },
+        {
+          "piece": "TT_ML",
+          "point_in": "J:M_BAR1->TT_ML",
+          "point_out": "J:TT_ML->U_LFT",
+          "cum_cm_start": 300.0,
+          "cum_wheels_start": 20
+        },
+        {
+          "piece": "U_LFT",
+          "point_in": "J:TT_ML->U_LFT",
+          "point_out": "J:U_LFT->TT_TL",
+          "cum_cm_start": 300.0,
+          "cum_wheels_start": 20
+        }
+      ]
+    },
+    "lower": {
+      "order": [
+        "TT_MR",
+        "L_R1",
+        "L_R2",
+        "L_R3",
+        "L_R4",
+        "L_R5",
+        "TT_BR",
+        "L_BOT2",
+        "L_BOT1",
+        "TT_BL",
+        "L_L4",
+        "L_L3",
+        "L_L2",
+        "L_L1",
+        "TT_ML",
+        "M_BAR1",
+        "M_BAR2"
+      ],
+      "length_cm": 960.0,
+      "wheels": 64,
+      "ring": [
+        {
+          "piece": "TT_MR",
+          "point_in": "J:M_BAR2->TT_MR",
+          "point_out": "J:TT_MR->L_R1",
+          "cum_cm_start": 0.0,
+          "cum_wheels_start": 0
+        },
+        {
+          "piece": "L_R1",
+          "point_in": "J:TT_MR->L_R1",
+          "point_out": "J:L_R1->L_R2",
+          "cum_cm_start": 0.0,
+          "cum_wheels_start": 0
+        },
+        {
+          "piece": "L_R2",
+          "point_in": "J:L_R1->L_R2",
+          "point_out": "J:L_R2->L_R3",
+          "cum_cm_start": 60.0,
+          "cum_wheels_start": 4
+        },
+        {
+          "piece": "L_R3",
+          "point_in": "J:L_R2->L_R3",
+          "point_out": "J:L_R3->L_R4",
+          "cum_cm_start": 120.0,
+          "cum_wheels_start": 8
+        },
+        {
+          "piece": "L_R4",
+          "point_in": "J:L_R3->L_R4",
+          "point_out": "J:L_R4->L_R5",
+          "cum_cm_start": 240.0,
+          "cum_wheels_start": 16
+        },
+        {
+          "piece": "L_R5",
+          "point_in": "J:L_R4->L_R5",
+          "point_out": "J:L_R5->TT_BR",
+          "cum_cm_start": 300.0,
+          "cum_wheels_start": 20
+        },
+        {
+          "piece": "TT_BR",
+          "point_in": "J:L_R5->TT_BR",
+          "point_out": "J:TT_BR->L_BOT2",
+          "cum_cm_start": 360.0,
+          "cum_wheels_start": 24
+        },
+        {
+          "piece": "L_BOT2",
+          "point_in": "J:TT_BR->L_BOT2",
+          "point_out": "J:L_BOT2->L_BOT1",
+          "cum_cm_start": 360.0,
+          "cum_wheels_start": 24
+        },
+        {
+          "piece": "L_BOT1",
+          "point_in": "J:L_BOT2->L_BOT1",
+          "point_out": "J:L_BOT1->TT_BL",
+          "cum_cm_start": 420.0,
+          "cum_wheels_start": 28
+        },
+        {
+          "piece": "TT_BL",
+          "point_in": "J:L_BOT1->TT_BL",
+          "point_out": "J:TT_BL->L_L4",
+          "cum_cm_start": 480.0,
+          "cum_wheels_start": 32
+        },
+        {
+          "piece": "L_L4",
+          "point_in": "J:TT_BL->L_L4",
+          "point_out": "J:L_L4->L_L3",
+          "cum_cm_start": 480.0,
+          "cum_wheels_start": 32
+        },
+        {
+          "piece": "L_L3",
+          "point_in": "J:L_L4->L_L3",
+          "point_out": "J:L_L3->L_L2",
+          "cum_cm_start": 600.0,
+          "cum_wheels_start": 40
+        },
+        {
+          "piece": "L_L2",
+          "point_in": "J:L_L3->L_L2",
+          "point_out": "J:L_L2->L_L1",
+          "cum_cm_start": 720.0,
+          "cum_wheels_start": 48
+        },
+        {
+          "piece": "L_L1",
+          "point_in": "J:L_L2->L_L1",
+          "point_out": "J:L_L1->TT_ML",
+          "cum_cm_start": 780.0,
+          "cum_wheels_start": 52
+        },
+        {
+          "piece": "TT_ML",
+          "point_in": "J:L_L1->TT_ML",
+          "point_out": "J:TT_ML->M_BAR1",
+          "cum_cm_start": 840.0,
+          "cum_wheels_start": 56
+        },
+        {
+          "piece": "M_BAR1",
+          "point_in": "J:TT_ML->M_BAR1",
+          "point_out": "J:M_BAR1->M_BAR2",
+          "cum_cm_start": 840.0,
+          "cum_wheels_start": 56
+        },
+        {
+          "piece": "M_BAR2",
+          "point_in": "J:M_BAR1->M_BAR2",
+          "point_out": "J:M_BAR2->TT_MR",
+          "cum_cm_start": 900.0,
+          "cum_wheels_start": 60
+        }
+      ]
+    }
+  },
+  "position_encoding": {
+    "scheme": "between_pieces",
+    "description": "A box position = {loop, piece, pct} where pct in [0,100] is travel progress along 'piece'; the box is between piece (point_in side) and the next piece (point_out side). Global per-loop coordinates cum_cm_start / cum_wheels_start let the camera wheel-count and IMU distance map onto one scale.",
+    "example": {
+      "loop": "lower",
+      "piece": "L_R3",
+      "pct": 42.0
+    }
+  }
+}
