@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bearing_rf.h"
 #include "capture.h"
 #include "deploy.h"
 #include "manifest.h"
@@ -36,6 +37,9 @@
 #define LINE        "line1"
 #define CONTAINER   "cnc-7"
 #define PUB_SUBJECT "edge." LINE "." CONTAINER          // through the Vector boundary
+#define BACKEND_ALERT_THRESHOLD 0.60f
+#define DETECTOR_ID "bearing_rf"
+#define DETECTOR_VERSION "bearing-rf-randomforest@2026-06-25"
 // Contract C artifact stream (chunked frames). Distinct from models.<line>.deploy, which carries
 // the JSON deploy *event* for the dashboard — this subject carries the model *bytes* for devices.
 #define DEPLOY_SUB  "models." LINE ".artifact"
@@ -96,18 +100,63 @@ static void deploy_session_reset(void) {
     deploy_rx_reset(&g_dep.rx);
 }
 
-// Publish one Contract B inference result.
-static void publish_score(int sock, float score) {
-    char body[160];
+static float bearing_rf_wire_anomaly_score(float raw_score) {
+    if (raw_score <= 0.0f) return 0.0f;
+    if (raw_score >= 1.0f) return 1.0f;
+    if (raw_score < BEARING_RF_THRESHOLD) {
+        return (raw_score / BEARING_RF_THRESHOLD) * BACKEND_ALERT_THRESHOLD;
+    }
+    return BACKEND_ALERT_THRESHOLD +
+           ((raw_score - BEARING_RF_THRESHOLD) / (1.0f - BEARING_RF_THRESHOLD)) *
+           (1.0f - BACKEND_ALERT_THRESHOLD);
+}
+
+// Publish one Contract B inference result for the bearing RF detector. The wire anomaly_score is
+// mapped so raw BEARING_RF_THRESHOLD corresponds exactly to the bridge alert threshold (0.60).
+static void publish_bearing_rf(int sock) {
+    volatile shared_score_t *shared = SHARED_SCORE;
+    uint32_t seq = shared->bearing_rf_seq;
+    uint32_t window_ms = shared->bearing_rf_window_ms;
+    uint32_t status = shared->bearing_rf_status;
+    float raw_score = shared->bearing_rf_score;
+    float fault_percent = shared->bearing_rf_fault_percent;
+    float anomaly_score = bearing_rf_wire_anomaly_score(raw_score);
+    bool fault = status == (uint32_t)BEARING_RF_STATUS_FAULT;
+    const char *status_text = fault ? "FAULT" : "OK";
+
+    char body[384];
     int blen = snprintf(body, sizeof(body),
-                        "{\"ts\":\"\",\"container_id\":\"" CONTAINER "\","
-                        "\"anomaly_score\":%.4f,\"data_classification\":\"inference\","
-                        "\"bytes\":0}",
-                        (double)score);
-    char frame[256];
+                        "{\"ts\":\"\",\"container_id\":\"" CONTAINER "\"," 
+                        "\"data_classification\":\"inference\"," 
+                        "\"detector\":\"" DETECTOR_ID "\","
+                        "\"model_version\":\"" DETECTOR_VERSION "\"," 
+                        "\"window_ms\":%lu,\"monotonic_ms\":%lu,\"seq\":%lu,"
+                        "\"anomaly_score\":%.4f,\"raw_score\":%.6f,"
+                        "\"fault_percent\":%.2f,\"status\":\"%s\","
+                        "\"fault\":%s,\"bytes\":0}",
+                        (unsigned long)window_ms, (unsigned long)window_ms, (unsigned long)seq,
+                        (double)anomaly_score, (double)raw_score, (double)fault_percent,
+                        status_text, fault ? "true" : "false");
+    if (blen < 0 || (size_t)blen >= sizeof(body)) {
+        printf("[nats] payload build failed detector=" DETECTOR_ID "\n");
+        return;
+    }
+    printf("[nats] payload built subject=%s seq=%lu anomaly_score=%.4f status=%s\n",
+           PUB_SUBJECT, (unsigned long)seq, (double)anomaly_score, status_text);
+
+    char frame[512];
     int flen = nats_build_pub(frame, sizeof(frame), PUB_SUBJECT,
                               (const uint8_t *)body, (size_t)blen);
-    if (flen > 0) hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
+    if (flen <= 0) {
+        printf("[nats] publish frame build failed subject=%s\n", PUB_SUBJECT);
+        return;
+    }
+    int sent = hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
+    if (sent == flen) {
+        printf("[nats] publish success subject=%s bytes=%d\n", PUB_SUBJECT, sent);
+    } else {
+        printf("[nats] publish failure subject=%s sent=%d expected=%d\n", PUB_SUBJECT, sent, flen);
+    }
 }
 
 // Publish one gathered feature window to the capture sink, tagged with the command metadata so
@@ -121,10 +170,10 @@ static void publish_capture_window(int sock, const int8_t *feat, size_t n,
 
     static char body[sizeof(b64) + 256];
     int blen = snprintf(body, sizeof(body),
-                        "{\"request_id\":\"%s\",\"label\":\"%s\",\"segment\":\"%s\","
-                        "\"seq\":%u,\"container_id\":\"" CONTAINER "\","
+                        "{\"request_id\":\"%s\",\"label\":\"%s\",\"segment\":\"%s\"," 
+                        "\"seq\":%lu,\"container_id\":\"" CONTAINER "\"," 
                         "\"data_classification\":\"capture\",\"features_b64\":\"%s\"}",
-                        e->request_id, e->label, e->segment, seq, b64);
+                        e->request_id, e->label, e->segment, (unsigned long)seq, b64);
     if (blen < 0 || (size_t)blen >= sizeof(body)) return;
 
     static char frame[sizeof(body) + 128];
@@ -317,6 +366,7 @@ int device_main(void) {
     char sub[128];
     int sn = snprintf(sub, sizeof(sub), "SUB %s 1\r\nSUB %s 2\r\n", DEPLOY_SUB, CAPTURE_SUB);
     hal_tcp_send(sock, (const uint8_t *)sub, (size_t)sn);
+    uint32_t last_bearing_rf_seq = 0;
 
     for (;;) {
         // Drain any pending protocol lines (keepalive + inbound deploys).
@@ -351,8 +401,8 @@ int device_main(void) {
                             if (cmd.stop) {
                                 printf("[capture] stop listening\n");
                             } else {
-                                printf("[capture] watching segment=%s label=%s (%u total)\n",
-                                       cmd.segment, cmd.label, g_capture.count);
+                                printf("[capture] watching segment=%s label=%s (%lu total)\n",
+                                       cmd.segment, cmd.label, (unsigned long)g_capture.count);
                             }
                         }
                     }
@@ -365,12 +415,17 @@ int device_main(void) {
 
         // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score (and, while
         // shadowing a candidate, the candidate's score on the same window) arrive over the shared
-        // SOCMEM mailbox. model_loader_infer reads them; CM33-NS forwards the active score to NATS.
-        // Until CM55 has produced its first score (magic unset), the score is 0.
+        // SOCMEM mailbox. model_loader_infer reads them for shadow/capture; Contract B publish uses
+        // the bearing RF fields below. Until CM55 has produced its first NPU score (magic unset),
+        // the NPU score is 0.
         float candidate_score = 0.0f;
         bool  have_candidate = false;
         float score = model_loader_infer(NULL, 0, &candidate_score, &have_candidate);
-        publish_score(sock, score);
+        uint32_t bearing_rf_seq = SHARED_SCORE->bearing_rf_seq;
+        if (bearing_rf_seq != 0u && bearing_rf_seq != last_bearing_rf_seq) {
+            publish_bearing_rf(sock);
+            last_bearing_rf_seq = bearing_rf_seq;
+        }
 
         // While listening, record this window whenever the device is on a watched segment.
         // The feature window is computed on CM55 and mirrored into the shared mailbox; publish

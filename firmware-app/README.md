@@ -15,6 +15,7 @@ app adds only the board bring-up (`proj_cm33_ns/source/main.c`) and a no-TFLM mo
 |---|---|
 | Wi-Fi association (SDIO + WCM) | ✅ real — `hal_net_init()` |
 | TLS transport + NATS publish (Contract B) | ✅ real (secure-by-default; see TLS note) |
+| Bearing RandomForest detector | ✅ integrated on CM55; publishes RF inference on `edge.<line>.<container_id>` |
 | Contract C deploy frame receive + manifest/sig validate | ✅ real |
 | QSPI flash persistence of model slots | ⛔ **stubbed** (`HAL_FLASH_STUB`) — see below |
 | On-device TFLM + Ethos-U inference | ⛔ stubbed (`model_loader_stub.c`) — "full image" scope |
@@ -24,6 +25,18 @@ for the E84 (`cyhal.h` missing); the E84 needs its own SMIF bring-up. And the TF
 is a separate large integration. Both are deferred to the "full image" milestone. With the stubs, an
 inbound deploy is received and validated but aborts cleanly at the (failing) flash write — it cannot
 corrupt anything — while Wi-Fi + TLS + NATS publish run for real.
+
+## Bearing RF detector
+
+The generated detector remains in `../firmware/src/bearing_rf.c` with its public API in
+`../firmware/include/bearing_rf.h`; `proj_cm55/Makefile` references that source directly. CM55 keeps
+only the current 1-second numeric accel/gyro window (50 samples), overwriting older samples as the
+ring advances, extracts the 10 `analysis/features.py` feature values, calls
+`bearing_rf_detect_features()`, and mirrors raw score/status/fault percent into the shared mailbox.
+CM33-NS publishes the Contract B JSON through the existing NATS helper on `edge.line1.cnc-7` with
+`data_classification:"inference"`. The embedded filter uses the same Butterworth coefficients as
+the Python reference but applies forward/backward filtering inside the current window; Python filters
+the full session before slicing, so edge-transient parity is the remaining known gap.
 
 ## Build
 

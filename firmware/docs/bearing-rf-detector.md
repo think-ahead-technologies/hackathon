@@ -165,6 +165,19 @@ repeat forever:
 
 Audio and video are out of scope for this integration. Do not store audio or video payloads. Keep only numeric samples from the connected sensors required for the 1 second feature window. After each pass, remove samples older than the active window.
 
+## firmware-app Integration Status
+
+The flashable board app now references the generated detector directly from the shared firmware tree:
+
+- `firmware-app/proj_cm55/Makefile` compiles `../../firmware/src/bearing_features.c` and `../../firmware/src/bearing_rf.c`.
+- CM55 samples BMI270 accel/gyro at 50 Hz, keeps a 50-sample numeric ring buffer, overwrites samples older than the current 1-second window, extracts the 10 RF features, and calls `bearing_rf_detect_features()` once per completed 1-second window.
+- CM55 mirrors `bearing_rf_seq`, `bearing_rf_window_ms`, raw RF `score`, `fault_percent`, and status through `shared_score_t`.
+- CM33-NS publishes the result through the existing NATS helper on `edge.line1.cnc-7` with `data_classification:"inference"`, detector/model identifiers, status/fault, raw score, fault percent, and mapped `anomaly_score`.
+
+The wire score mapping is piecewise linear: raw `0.0 -> 0.0`, raw `BEARING_RF_THRESHOLD` (`0.20974355`) -> backend alert threshold `0.60`, and raw `1.0 -> 1.0`. Therefore every local RF `FAULT` maps to `anomaly_score >= 0.60` for the bridge.
+
+Known parity gap: `analysis/features.py` applies SciPy `filtfilt` to the full loaded session and then slices windows. The embedded adapter uses the same 50 Hz Butterworth coefficients but applies forward/backward filtering only inside the current rolling window, so first/last samples in each window can differ slightly from the Python session-level result. The feature order and scalar definitions otherwise match the reference as closely as practical on target.
+
 ## Sensor Window Requirements
 
 Use a ring buffer per sensor stream.

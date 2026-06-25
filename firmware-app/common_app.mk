@@ -71,6 +71,10 @@ endif
 # just works. Override on the CLI or environment for a different location, e.g.:
 #   make build CY_GETLIBS_SHARED_PATH=/path/to/parent CY_GETLIBS_SHARED_NAME=mtb_shared
 CY_GETLIBS_SHARED_NAME ?= mtb_shared
-ifneq ($(wildcard $(HOME)/mtw/$(CY_GETLIBS_SHARED_NAME)),)
+ifneq ($(wildcard $(abspath ../$(CY_GETLIBS_SHARED_NAME))),)
+CY_GETLIBS_SHARED_PATH ?= $(abspath ..)
+else ifneq ($(wildcard $(abspath ../../$(CY_GETLIBS_SHARED_NAME))),)
+CY_GETLIBS_SHARED_PATH ?= $(abspath ../..)
+else ifneq ($(wildcard $(HOME)/mtw/$(CY_GETLIBS_SHARED_NAME)),)
 CY_GETLIBS_SHARED_PATH ?= $(HOME)/mtw
 endif

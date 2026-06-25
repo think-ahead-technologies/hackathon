@@ -11,6 +11,7 @@
 // so convert raw int16 -> g -> m/s^2 to match the spectrogram the model was trained on.
 #define IMU_LSB_PER_G   16384.0f
 #define IMU_G_TO_MS2    9.80665f
+#define IMU_LSB_PER_DPS 16.4f
 
 static cy_stc_scb_i2c_context_t g_i2c_ctx;
 static mtb_hal_i2c_t            g_i2c;
@@ -39,14 +40,22 @@ bool imu_init(void) {
     return true;
 }
 
-bool imu_read_accel_ms2(float out[3]) {
+bool imu_read_motion(float accel_ms2[3], float gyro_dps[3]) {
     mtb_bmi270_data_t data;
     if (mtb_bmi270_read(&g_bmi270, &data) != CY_RSLT_SUCCESS) {
         return false;
     }
-    const float k = IMU_G_TO_MS2 / IMU_LSB_PER_G;
-    out[0] = (float)data.sensor_data.acc.x * k;
-    out[1] = (float)data.sensor_data.acc.y * k;
-    out[2] = (float)data.sensor_data.acc.z * k;
+    const float acc_k = IMU_G_TO_MS2 / IMU_LSB_PER_G;
+    accel_ms2[0] = (float)data.sensor_data.acc.x * acc_k;
+    accel_ms2[1] = (float)data.sensor_data.acc.y * acc_k;
+    accel_ms2[2] = (float)data.sensor_data.acc.z * acc_k;
+    gyro_dps[0] = (float)data.sensor_data.gyr.x / IMU_LSB_PER_DPS;
+    gyro_dps[1] = (float)data.sensor_data.gyr.y / IMU_LSB_PER_DPS;
+    gyro_dps[2] = (float)data.sensor_data.gyr.z / IMU_LSB_PER_DPS;
     return true;
+}
+
+bool imu_read_accel_ms2(float out[3]) {
+    float gyro_dps[3];
+    return imu_read_motion(out, gyro_dps);
 }

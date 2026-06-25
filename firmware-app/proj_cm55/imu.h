@@ -12,4 +12,8 @@ bool imu_init(void);
 // Read one accelerometer sample into out[3] = {x,y,z} in m/s^2. Returns false on failure.
 bool imu_read_accel_ms2(float out[3]);
 
+// Read one accel + gyro sample. Accel is m/s^2; gyro is degrees/second to match the
+// Imagimob IMU CSV scale used by analysis/features.py.
+bool imu_read_motion(float accel_ms2[3], float gyro_dps[3]);
+
 #endif  // IMU_H

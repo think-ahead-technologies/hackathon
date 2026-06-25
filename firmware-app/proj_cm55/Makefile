@@ -69,6 +69,8 @@ CORE_NAME=CM55_0
 FW_SRC := ../../firmware/src
 SOURCES+=$(FW_SRC)/features.c \
          $(FW_SRC)/score.c \
+         $(FW_SRC)/bearing_features.c \
+         $(FW_SRC)/bearing_rf.c \
          $(FW_SRC)/model_vela_data.c \
          $(FW_SRC)/npu_infer.c
 

@@ -17,12 +17,19 @@
 #define SHARED_SCORE_MAGIC   0x57454152u   // 'WEAR' — set by CM55 once inference is live
 
 // CM55 -> CM33. Carries the ACTIVE model score always, plus the CANDIDATE score while shadowing.
+// The bearing_rf_* fields carry the board-side RandomForest result for the latest completed
+// 1 s numeric IMU window; CM33 publishes those fields to NATS without disturbing the NPU shadow path.
 typedef struct {
     volatile uint32_t magic;            // SHARED_SCORE_MAGIC once CM55 has produced a score
     volatile uint32_t seq;              // incremented each CM55 inference (liveness)
     volatile float    score;            // latest dwell-smoothed anomaly score (ACTIVE model)
     volatile float    candidate_score;  // latest CANDIDATE score; meaningful only when have_candidate
     volatile uint32_t have_candidate;   // 1 while a candidate model is loaded and being shadowed
+    volatile uint32_t bearing_rf_seq;            // increments after each RF inference window
+    volatile uint32_t bearing_rf_window_ms;      // monotonic end time of the 1 s window
+    volatile uint32_t bearing_rf_status;         // bearing_rf_status_t as uint32_t
+    volatile float    bearing_rf_score;          // raw RF probability-like score
+    volatile float    bearing_rf_fault_percent;  // raw score as 0..100 percent
     // Latest int8 feature window CM55 fed the model — mirrored here so CM33 can publish it for
     // Contract E training capture (the features live on CM55, where the IMU + NPU are).
     volatile int8_t   features[FEAT_OUT_LEN];

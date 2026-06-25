@@ -111,7 +111,7 @@ DEFINES += MQTT_DO_NOT_USE_CUSTOM_CONFIG
 # + power-fail-atomic metadata). Requires the serial-flash middleware and the QSPI Configurator
 # output (cycfg_qspi_memslot.h / smifBlockConfig) in the build, and hal_flash_init() at boot.
 # To fall back to the no-persistence connectivity build (deploys abort cleanly), re-add:
-#   DEFINES += HAL_FLASH_STUB
+DEFINES += HAL_FLASH_STUB
 
 # Wi-Fi credentials. An SSID/password containing spaces does NOT survive a -D define
 # through make (it word-splits into broken flags), so the robust path is a local,
@@ -124,10 +124,12 @@ DEFINES += MQTT_DO_NOT_USE_CUSTOM_CONFIG
 # With neither, platform_hal_pse84.c's "MY_WIFI_SSID"/... defaults apply.
 WIFI_CREDS_HEADER := $(wildcard wifi_credentials.h)
 ifneq ($(WIFI_CREDS_HEADER),)
-CFLAGS += -include $(abspath wifi_credentials.h)
+CFLAGS += -include wifi_credentials.h
 else ifneq ($(WIFI_SSID),)
 DEFINES += WIFI_SSID='"$(WIFI_SSID)"' WIFI_PASSWORD='"$(WIFI_PASSWORD)"'
 endif
+WIFI_SECURITY_TYPE ?= CY_WCM_SECURITY_WPA3_WPA2_PSK
+DEFINES += WIFI_SECURITY_TYPE=$(WIFI_SECURITY_TYPE)
 
 # NATS broker target, build-overridable:
 #   make build NATS_HOST=10.247.217.107 NATS_PORT=4222 NATS_DISABLE_TLS=1

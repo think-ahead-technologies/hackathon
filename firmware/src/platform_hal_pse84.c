@@ -300,7 +300,9 @@ bool hal_nkey_sign(const uint8_t *nonce, size_t len, uint8_t sig[64]) {
 #ifndef WIFI_PASSWORD
 #define WIFI_PASSWORD        "MY_WIFI_PASSWORD"
 #endif
+#ifndef WIFI_SECURITY_TYPE
 #define WIFI_SECURITY_TYPE   CY_WCM_SECURITY_WPA2_AES_PSK
+#endif
 #define WIFI_MAX_RETRY       (3u)
 
 #define APP_SDIO_INTERRUPT_PRIORITY        (7u)
@@ -372,7 +374,9 @@ bool hal_net_init(void) {
 
     g_wcm_config.interface = CY_WCM_INTERFACE_TYPE_STA;
     g_wcm_config.wifi_interface_instance = &g_sdio;
-    if (cy_wcm_init(&g_wcm_config) != CY_RSLT_SUCCESS) {
+    cy_rslt_t init_rc = cy_wcm_init(&g_wcm_config);
+    if (init_rc != CY_RSLT_SUCCESS) {
+        printf("[wifi] cy_wcm_init FAILED rc=0x%08lx\n", (unsigned long)init_rc);
         return false;
     }
 
@@ -383,9 +387,11 @@ bool hal_net_init(void) {
 
     cy_wcm_ip_address_t ip_addr;
     bool associated = false;
-    printf("[wifi] joining SSID '%s'...\n", WIFI_SSID);
+    printf("[wifi] joining SSID '%s' security=0x%08lx...\n", WIFI_SSID,
+           (unsigned long)WIFI_SECURITY_TYPE);
     for (uint32_t attempt = 0; attempt < WIFI_MAX_RETRY; attempt++) {
-        if (cy_wcm_connect_ap(&connect_param, &ip_addr) == CY_RSLT_SUCCESS) {
+        cy_rslt_t connect_rc = cy_wcm_connect_ap(&connect_param, &ip_addr);
+        if (connect_rc == CY_RSLT_SUCCESS) {
             associated = true;   // associated + DHCP lease in hand
             if (ip_addr.version == CY_WCM_IP_VER_V4) {
                 printf("[wifi] joined '%s', IP %s\n", WIFI_SSID,
@@ -395,7 +401,10 @@ bool hal_net_init(void) {
             }
             break;
         }
-        printf("[wifi] attempt %lu failed, retrying...\n", (unsigned long)(attempt + 1));
+        printf("[wifi] attempt %lu failed rc=0x%08lx%s\n",
+               (unsigned long)(attempt + 1), (unsigned long)connect_rc,
+               (attempt + 1u < WIFI_MAX_RETRY) ? ", retrying..." : "");
+        hal_sleep_ms(1000u);
     }
     if (!associated) {
         printf("[wifi] FAILED to join '%s' after %u attempts\n", WIFI_SSID, WIFI_MAX_RETRY);

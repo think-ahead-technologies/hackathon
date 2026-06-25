@@ -36,8 +36,11 @@
 #include "cyabs_rtos.h"
 #include "cyabs_rtos_impl.h"
 #include "cy_time.h"
+#include <stdio.h>
 #include <string.h>
 
+#include "bearing_features.h"
+#include "bearing_rf.h"
 #include "npu_infer.h"
 #include "features.h"
 #include "score.h"
@@ -50,6 +53,7 @@
 #define TASK_NAME                ("CM55 Task")
 #define TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 4U)
 #define TASK_PRIORITY            (configMAX_PRIORITIES - 1U)
+#define IMU_SAMPLE_PERIOD_MS     (20U)
 
 /* Enabling or disabling a MCWDT requires a wait time of upto 2 CLK_LF cycles  
  * to come into effect. This wait time value will depend on the actual CLK_LF  
@@ -165,11 +169,21 @@ static int cm55_apply_ctrl(const volatile shared_model_ctrl_t *ctrl,
     }
 }
 
+static void publish_bearing_rf_to_mailbox(const bearing_rf_result_t *result, uint32_t window_ms)
+{
+    SHARED_SCORE->bearing_rf_score = result->score;
+    SHARED_SCORE->bearing_rf_fault_percent = result->fault_percent;
+    SHARED_SCORE->bearing_rf_status = (uint32_t)result->status;
+    SHARED_SCORE->bearing_rf_window_ms = window_ms;
+    __DMB();
+    SHARED_SCORE->bearing_rf_seq++;
+}
+
 /* NPU inference task: run the active wear model (and a candidate while one is being shadowed) on the
  * Ethos-U55, dwell-smooth the scores, and publish them to CM33-NS via the shared SOCMEM mailbox.
- * CM33 forwards the active score to NATS and owns the shadow promote/rollback verdict; this task
- * also services CM33's model-control commands (load from flash slot, promote, clear) at the top of
- * each window. */
+ * CM33 publishes the bearing RF result to NATS and owns the shadow promote/rollback verdict for the
+ * NPU path; this task also services CM33's model-control commands (load from flash slot, promote,
+ * clear) at the top of each window. */
 static void cm55_task(void * arg)
 {
     CY_UNUSED_PARAMETER(arg);
@@ -186,12 +200,20 @@ static void cm55_task(void * arg)
     static int8_t features[FEAT_OUT_LEN];
     static dwell_t active_dwell;                          /* zero-initialized */
     static dwell_t cand_dwell;                            /* reset whenever a candidate loads */
+    static bearing_sensor_window_t bearing_window;
+    static uint32_t accel_window_samples;
+    static uint32_t bearing_samples_since_infer;
+
+    bearing_window_init(&bearing_window);
+    SHARED_SCORE->bearing_rf_seq = 0;
+    SHARED_SCORE->bearing_rf_status = (uint32_t)BEARING_RF_STATUS_INVALID_INPUT;
 
     /* Baseline the command counter so steady-state commands (deploys) are applied exactly once.
      * Boot-time active-load ordering (CM33 posting before this task polls) is handled by the boot
      * sequence (docs §6); until then npu_infer_init's baked model serves as the active model. */
     volatile shared_model_ctrl_t *ctrl = SHARED_MODEL_CTRL;
     uint32_t last_cmd = ctrl->cmd_seq;
+    TickType_t last_wake = xTaskGetTickCount();
 
     for (;;)
     {
@@ -205,43 +227,95 @@ static void cm55_task(void * arg)
             last_cmd = ctrl->cmd_seq;
         }
 
-        /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. */
-        for (int i = 0; i < FEAT_WINDOW_SAMPLES; i++)
+        float accel_ms2[3];
+        float gyro_dps[3];
+        uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+        if (!imu_read_motion(accel_ms2, gyro_dps))
         {
-            imu_read_accel_ms2(&accel_window[i * 3]);
-            vTaskDelay(pdMS_TO_TICKS(20));   /* ~50 Hz (FEAT_FS) */
+            printf("[bearing] sample received failed t_ms=%lu\n", (unsigned long)now_ms);
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(IMU_SAMPLE_PERIOD_MS));
+            continue;
+        }
+        printf("[bearing] sample received t_ms=%lu\n", (unsigned long)now_ms);
+
+        bearing_sensor_sample_t sample = {
+            .t_ms = now_ms,
+            .ax_ms2 = accel_ms2[0], .ay_ms2 = accel_ms2[1], .az_ms2 = accel_ms2[2],
+            .gx_dps = gyro_dps[0], .gy_dps = gyro_dps[1], .gz_dps = gyro_dps[2],
+        };
+        bearing_sensor_sample_t overwritten;
+        bool old_sample_discarded = bearing_window_push(&bearing_window, &sample, &overwritten);
+        printf("[bearing] window updated samples=%lu/%u\n",
+               (unsigned long)bearing_window_count(&bearing_window), BEARING_SENSOR_WINDOW_SAMPLES);
+        if (old_sample_discarded)
+        {
+            printf("[bearing] old sample discarded t_ms=%lu\n", (unsigned long)overwritten.t_ms);
+        }
+
+        uint32_t accel_index = accel_window_samples % FEAT_WINDOW_SAMPLES;
+        accel_window[accel_index * 3] = accel_ms2[0];
+        accel_window[(accel_index * 3) + 1] = accel_ms2[1];
+        accel_window[(accel_index * 3) + 2] = accel_ms2[2];
+        accel_window_samples++;
+        bearing_samples_since_infer++;
+
+        if (bearing_window_ready(&bearing_window) &&
+            bearing_samples_since_infer >= BEARING_SENSOR_WINDOW_SAMPLES)
+        {
+            float rf_features[BEARING_RF_FEATURE_COUNT];
+            uint32_t window_ms = bearing_window_end_ms(&bearing_window);
+            printf("[bearing] feature extraction started window_ms=%lu\n", (unsigned long)window_ms);
+            if (bearing_extract_features(&bearing_window, rf_features))
+            {
+                printf("[bearing] feature extraction completed\n");
+                bearing_rf_result_t rf = bearing_rf_detect_features(rf_features);
+                printf("[bearing] inference result status=%s raw=%.4f fault_percent=%.2f\n",
+                       rf.status == BEARING_RF_STATUS_FAULT ? "FAULT" : "OK",
+                       (double)rf.score, (double)rf.fault_percent);
+                publish_bearing_rf_to_mailbox(&rf, window_ms);
+            }
+            else
+            {
+                printf("[bearing] feature extraction failed\n");
+            }
+            bearing_samples_since_infer = 0;
         }
 
         /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
-        features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
-        float active = npu_run(NPU_ACTIVE, features, FEAT_OUT_LEN);
-        if (active >= 0.0f)
+        if (accel_window_samples >= FEAT_WINDOW_SAMPLES)
         {
-            /* Mirror the window into the mailbox so CM33 can publish it for Contract E capture. */
-            for (int i = 0; i < FEAT_OUT_LEN; i++) {
-                SHARED_SCORE->features[i] = features[i];
-            }
-            SHARED_SCORE->score = score_dwell(&active_dwell, active);
-
-            /* Shadow: run the candidate on the SAME window so CM33 can compare apples to apples. */
-            if (npu_role_loaded(NPU_CANDIDATE))
+            features_from_accel(accel_window, FEAT_WINDOW_SAMPLES, features);
+            float active = npu_run(NPU_ACTIVE, features, FEAT_OUT_LEN);
+            if (active >= 0.0f)
             {
-                float cand = npu_run(NPU_CANDIDATE, features, FEAT_OUT_LEN);
-                if (cand >= 0.0f) {
-                    SHARED_SCORE->candidate_score = score_dwell(&cand_dwell, cand);
-                    SHARED_SCORE->have_candidate = 1;
+                /* Mirror the window into the mailbox so CM33 can publish it for Contract E capture. */
+                for (int i = 0; i < FEAT_OUT_LEN; i++) {
+                    SHARED_SCORE->features[i] = features[i];
+                }
+                SHARED_SCORE->score = score_dwell(&active_dwell, active);
+
+                /* Shadow: run the candidate on the SAME window so CM33 can compare apples to apples. */
+                if (npu_role_loaded(NPU_CANDIDATE))
+                {
+                    float cand = npu_run(NPU_CANDIDATE, features, FEAT_OUT_LEN);
+                    if (cand >= 0.0f) {
+                        SHARED_SCORE->candidate_score = score_dwell(&cand_dwell, cand);
+                        SHARED_SCORE->have_candidate = 1;
+                    } else {
+                        SHARED_SCORE->have_candidate = 0;
+                    }
                 } else {
                     SHARED_SCORE->have_candidate = 0;
                 }
-            } else {
-                SHARED_SCORE->have_candidate = 0;
-            }
 
-            __DMB();                       /* score data visible before magic/seq announce it */
-            SHARED_SCORE->seq++;
-            SHARED_SCORE->magic = SHARED_SCORE_MAGIC;
+                __DMB();                       /* score data visible before magic/seq announce it */
+                SHARED_SCORE->seq++;
+                SHARED_SCORE->magic = SHARED_SCORE_MAGIC;
+            }
+            accel_window_samples = 0;
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(IMU_SAMPLE_PERIOD_MS));
     }
 }
 
