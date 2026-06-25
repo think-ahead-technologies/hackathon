@@ -42,8 +42,12 @@ make test        # cc -Wall -Wextra -Werror; runs all suites
 ```
 
 ```
-130 checks, 0 failures
+181 checks, 0 failures
 ```
+
+For the generated bearing RandomForest detector and the 1-second board integration loop
+(sensor window, feature extraction, debug stages, and Contract B/NATS publish), see
+[`docs/bearing-rf-detector.md`](docs/bearing-rf-detector.md).
 
 ### Cross-language wire-format test
 

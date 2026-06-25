@@ -9,10 +9,12 @@ BUILD   := build
 
 # Pure, host-testable logic — no hardware, no TFLM.
 LOGIC_SRC := src/model_slot.c src/model_contract.c src/shadow.c src/nats_proto.c \
-             src/meta_store.c src/manifest.c src/deploy.c src/capture.c
+			 src/meta_store.c src/manifest.c src/deploy.c src/capture.c src/wear_fault.c \
+			 src/bearing_rf.c
 TEST_SRC  := test/test_runner.c test/test_model_slot.c test/test_model_contract.c \
-             test/test_shadow.c test/test_nats_proto.c test/test_meta_store.c \
-             test/test_manifest.c test/test_deploy.c test/test_capture.c
+			 test/test_shadow.c test/test_nats_proto.c test/test_meta_store.c \
+			 test/test_manifest.c test/test_deploy.c test/test_capture.c test/test_wear_fault.c \
+			 test/test_bearing_rf.c
 
 .DEFAULT_GOAL := test
 
@@ -22,7 +24,7 @@ test: $(BUILD)/tests
 	./$(BUILD)/tests
 
 $(BUILD)/tests: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
-	$(CC) $(CFLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $@
+	$(CC) $(CFLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -lm -o $@
 
 ## crosslang: prove deploy_frame.py output parses byte-identically through the C deploy/manifest code
 .PHONY: crosslang
@@ -56,6 +58,22 @@ score-cross: $(BUILD)/harness_score
 
 $(BUILD)/harness_score: src/score.c test/harness_score.c | $(BUILD)
 	$(CC) $(CFLAGS) src/score.c test/harness_score.c -lm -o $@
+
+## wear-fault-cross: compare wear_fault.c with Python feature criteria on real IMU sessions
+.PHONY: wear-fault-cross
+wear-fault-cross: $(BUILD)/harness_wear_fault
+	python test/wear_fault_cross_test.py ./$(BUILD)/harness_wear_fault
+
+$(BUILD)/harness_wear_fault: src/wear_fault.c test/harness_wear_fault.c | $(BUILD)
+	$(CC) $(CFLAGS) src/wear_fault.c test/harness_wear_fault.c -lm -o $@
+
+## bearing-rf-cross: compare exported bearing_rf.c with sklearn RF on real extracted windows
+.PHONY: bearing-rf-cross
+bearing-rf-cross: $(BUILD)/harness_bearing_rf
+	python test/bearing_rf_cross_test.py ./$(BUILD)/harness_bearing_rf
+
+$(BUILD)/harness_bearing_rf: src/bearing_rf.c test/harness_bearing_rf.c | $(BUILD)
+	$(CC) $(CFLAGS) src/bearing_rf.c test/harness_bearing_rf.c -lm -o $@
 
 $(BUILD):
 	mkdir -p $(BUILD)

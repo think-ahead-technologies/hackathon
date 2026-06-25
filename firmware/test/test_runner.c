@@ -23,6 +23,10 @@ int main(void) {
     run_deploy_tests();
     printf("capture\n");
     run_capture_tests();
+    printf("wear_fault\n");
+    run_wear_fault_tests();
+    printf("bearing_rf\n");
+    run_bearing_rf_tests();
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
