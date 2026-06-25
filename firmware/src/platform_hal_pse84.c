@@ -451,8 +451,10 @@ int hal_tcp_connect(const char *host, uint16_t port) {
     // (Kept out of the per-connection path; do it once in device bring-up.)
 #ifdef NATS_DISABLE_TLS
     const int proto = CY_SOCKET_IPPROTO_TCP;   // open demo only — plaintext
+    printf("[net] transport plain TCP (NATS_DISABLE_TLS)\n");
 #else
     const int proto = CY_SOCKET_IPPROTO_TLS;   // secure-by-default — encrypted + server-verified
+    printf("[net] transport TLS (server-auth)\n");
 #endif
     if (cy_socket_create(CY_SOCKET_DOMAIN_AF_INET, CY_SOCKET_TYPE_STREAM,
                          proto, &g_sock) != CY_RSLT_SUCCESS) {
