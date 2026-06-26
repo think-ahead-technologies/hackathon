@@ -80,6 +80,11 @@ score-cross: $(BUILD)/harness_score
 $(BUILD)/harness_score: src/score.c test/harness_score.c | $(BUILD)
 	$(CC) $(CFLAGS) src/score.c test/harness_score.c -lm -o $@
 
+## compile-commands: (re)generate compile_commands.json so clangd resolves our "..." headers
+.PHONY: compile-commands
+compile-commands:
+	python3 tools/gen_compile_commands.py
+
 $(BUILD):
 	mkdir -p $(BUILD)
 

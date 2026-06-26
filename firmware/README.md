@@ -52,6 +52,13 @@ make test-san   # ASan + UBSan — the adversarial parser tests catch bad offset
 make lint       # cppcheck static analysis (brew install cppcheck)
 ```
 
+For editor/clangd support (resolves the `"..."` includes), generate a compile DB once — it
+holds machine-specific absolute paths, so it's gitignored, not committed:
+
+```bash
+make compile-commands   # writes firmware/compile_commands.json
+```
+
 ### Cross-language wire-format test
 
 ```bash
