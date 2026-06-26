@@ -36,6 +36,22 @@ test-san: $(BUILD)/tests_san
 $(BUILD)/tests_san: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
 	$(CC) $(CFLAGS) $(SAN_FLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $@
 
+## test-m32: build and run the suite as a 32-bit binary so size_t-width bugs surface on the
+## host — e.g. a 32-bit offset+len overflow in the frame/manifest parsers that the 64-bit
+## build (where size_t is wide enough to never wrap) physically cannot see. Needs a
+## 32-bit-capable toolchain (Linux: apt-get install gcc-multilib). Skipped with a note where
+## the toolchain can't target 32-bit (e.g. macOS), so it's a no-op locally and real in CI.
+.PHONY: test-m32
+test-m32: | $(BUILD)
+	@if echo 'int main(void){return 0;}' | $(CC) -m32 -x c - -o /dev/null 2>/dev/null; then \
+		echo "building 32-bit test suite ($(CC) -m32)"; \
+		$(CC) $(CFLAGS) -m32 -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $(BUILD)/tests_m32 && \
+		./$(BUILD)/tests_m32; \
+	else \
+		echo "skip test-m32: $(CC) cannot build 32-bit binaries on this host"; \
+		echo "  (Linux CI: install gcc-multilib; macOS dropped 32-bit toolchain support)"; \
+	fi
+
 ## lint: static analysis with cppcheck (install: brew install cppcheck).
 ## Scans every src/ file — including the on-target HAL/orchestration the host build skips
 ## — for the bounds/overflow/uninitialized family. Missing BSP headers are tolerated, not

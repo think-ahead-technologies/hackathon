@@ -27,7 +27,10 @@ bool deploy_parse_header(const uint8_t *msg, size_t msg_len, deploy_hdr_t *out) 
     if (out->part < DEPLOY_PART_MANIFEST || out->part > DEPLOY_PART_MODEL) {
         return false;
     }
-    if ((size_t)DEPLOY_HDR_BYTES + out->chunk_len > msg_len) {
+    // uint64 add: size_t is 32-bit on the target, so a crafted chunk_len near UINT32_MAX would
+    // wrap a 32-bit sum below msg_len and pass this gate, breaking the "payload fits" guarantee
+    // every downstream consumer relies on. Same guard the reassembly path uses below.
+    if ((uint64_t)DEPLOY_HDR_BYTES + out->chunk_len > msg_len) {
         return false;  // declared payload doesn't fit the message
     }
     return true;

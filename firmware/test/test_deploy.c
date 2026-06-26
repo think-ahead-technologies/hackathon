@@ -49,6 +49,13 @@ void run_deploy_tests(void) {
     make_hdr(buf, 99 /*unknown part*/, 0, 10, 0, 10);
     CHECK(deploy_parse_header(buf, DEPLOY_HDR_BYTES + 10, &h) == false);
 
+    // chunk_len near UINT32_MAX must not wrap (size_t)DEPLOY_HDR_BYTES + chunk_len below msg_len
+    // on a 32-bit target and slip past the "payload fits" gate.
+    make_hdr(buf, DEPLOY_PART_MODEL, 0, 250, 0, 0xFFFFFFF0u);
+    CHECK(deploy_parse_header(buf, DEPLOY_HDR_BYTES + 50, &h) == false);
+    make_hdr(buf, DEPLOY_PART_MODEL, 0, 250, 0, 0xFFFFFFFFu);
+    CHECK(deploy_parse_header(buf, DEPLOY_HDR_BYTES + 50, &h) == false);
+
     // ---- reassembly: a clean 3-chunk stream ----
     deploy_rx_t rx;
     deploy_rx_reset(&rx);

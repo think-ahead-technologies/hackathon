@@ -66,9 +66,14 @@ jobs:
       - name: Install deps
         run: |
           pip install cryptography
-          sudo apt-get update && sudo apt-get install -y cppcheck
+          sudo apt-get update && sudo apt-get install -y cppcheck gcc-multilib
       - name: Unit tests (host logic)
         run: make -C firmware test
+      # The target is 32-bit (Cortex-M); this build exercises 32-bit size_t/pointer width so
+      # width-dependent bugs (e.g. a 32-bit offset+len overflow in the parsers) fail the PR
+      # instead of being invisible on the 64-bit build. Needs gcc-multilib (installed above).
+      - name: Unit tests (32-bit build)
+        run: make -C firmware test-m32
       - name: Unit tests under ASan + UBSan
         run: make -C firmware test-san
       - name: Static analysis (cppcheck)
