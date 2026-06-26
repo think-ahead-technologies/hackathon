@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "camera_publish.h"
 #include "capture.h"
 #include "deploy.h"
 #include "manifest.h"
@@ -39,6 +40,8 @@
 // Contract C artifact stream (chunked frames). Distinct from models.<line>.deploy, which carries
 // the JSON deploy *event* for the dashboard — this subject carries the model *bytes* for devices.
 #define DEPLOY_SUB  "models." LINE ".artifact"
+// Contract: edge.camera.<line>.<container> — per-frame JPEG, published straight to NATS (binary body).
+#define CAMERA_DATA_SUBJECT "edge.camera." LINE "." CONTAINER
 // Contract E directed-gather: the platform commands a capture on .cmd; the device streams the
 // gathered feature windows back on .data. The .data sink is deliberately OFF edge.> — the Vector
 // minimization boundary blocks raw/features there; operator-gated training capture is the
@@ -434,6 +437,12 @@ static void nats_session_run(int sock) {
             }
         }
 
+        // Camera frames publish independently of the inference cadence (their own rate, not the
+        // CM55 score seq): poll the camera HAL and PUB any new JPEG to edge.camera. Dormant until
+        // the capture pipeline is ported (the hal_camera stub returns no frame). A transport error
+        // here ends the session so the caller reconnects, same as a failed score publish.
+        if (camera_publish_step(sock, CAMERA_DATA_SUBJECT) < 0) return;
+
         // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score (and, while
         // shadowing a candidate, the candidate's score on the same window) arrive over the shared
         // SOCMEM mailbox. Publish only on a fresh score (seq advances once per CM55 window) so the
@@ -478,6 +487,9 @@ static void nats_session_run(int sock) {
 int device_main(void) {
     if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
     if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
+    // Camera capture is supplementary to inference on this unit: a bring-up failure must not strand
+    // the wear-detection path, so log and continue (camera_publish_step then just finds no frames).
+    if (!hal_camera_init()) printf("[cam] camera bring-up failed; continuing without camera\n");
 
     // Session loop: a dropped broker connection is a transient, not a fatal — re-establish it
     // forever rather than stranding the device until a power-cycle.

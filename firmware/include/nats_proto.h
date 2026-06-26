@@ -53,6 +53,13 @@ int nats_b64_encode(char *out, size_t cap, const uint8_t *data, size_t len);
 int nats_build_pub(char *buf, size_t cap, const char *subject,
                    const uint8_t *payload, size_t payload_len);
 
+// Write ONLY the PUB header line: "PUB <subject> <payload_len>\r\n" (no payload, no trailing
+// CRLF). Lets a caller scatter-send a large binary payload (e.g. a JPEG in SOCMEM) straight from
+// its source buffer — header line, then the payload, then a final "\r\n" — without copying it into
+// one contiguous frame buffer. `payload_len` must equal the total bytes the caller will then send
+// before the CRLF. Returns bytes written (excluding the NUL), or -1 if it would not fit in `cap`.
+int nats_build_pub_header(char *buf, size_t cap, const char *subject, size_t payload_len);
+
 // Parse a MSG header line into subject/sid/payload_len. Handles both the 3-token
 // (no reply) and 4-token (with reply-to) forms. Returns false on a malformed header.
 bool nats_parse_msg_header(const char *line, nats_msg_t *out);

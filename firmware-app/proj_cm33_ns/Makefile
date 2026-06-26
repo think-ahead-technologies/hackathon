@@ -85,6 +85,9 @@ SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/score.c \
          $(FW_SRC)/platform_hal_pse84.c \
          $(FW_SRC)/model_loader_cm33.c \
+         $(FW_SRC)/camera_proto.c \
+         $(FW_SRC)/camera_publish.c \
+         $(FW_SRC)/hal_camera_pse84.c \
          $(FW_SRC)/device_main.c
 
 # Like SOURCES, but for include directories. Value should be paths to

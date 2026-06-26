@@ -9,9 +9,12 @@ BUILD   := build
 
 # Pure, host-testable logic — no hardware, no TFLM.
 LOGIC_SRC := src/model_slot.c src/model_contract.c src/shadow.c src/nats_proto.c \
+             src/camera_proto.c src/cam_change.c \
              src/meta_store.c src/manifest.c src/deploy.c src/capture.c src/json_scan.c
 TEST_SRC  := test/test_runner.c test/test_model_slot.c test/test_model_contract.c \
-             test/test_shadow.c test/test_nats_proto.c test/test_meta_store.c \
+             test/test_shadow.c test/test_nats_proto.c test/test_camera_proto.c \
+             test/test_cam_change.c \
+             test/test_meta_store.c \
              test/test_manifest.c test/test_deploy.c test/test_capture.c
 
 .DEFAULT_GOAL := test

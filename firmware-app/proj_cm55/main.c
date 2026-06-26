@@ -43,6 +43,7 @@
 #include "score.h"
 #include "shared_score.h"
 #include "imu.h"
+#include "camera_stream.h"   /* USB-webcam capture + JPEG -> cam_shm (publishes to edge.camera) */
 
 /*******************************************************************************
  * Macros
@@ -52,7 +53,11 @@
  * dispatch (npu_run), both of which carry deep call frames; the previous 2 KB was too
  * tight. 8 KB leaves headroom — confirm against uxTaskGetStackHighWaterMark() on target. */
 #define TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 16U)
-#define TASK_PRIORITY            (configMAX_PRIORITIES - 1U)
+/* Sits BELOW the emUSB host ISR/main tasks (configMAX_PRIORITIES-1 / -2 inside camera_stream.c) so
+ * USB packet servicing always preempts inference — at equal priority the NPU dispatch would
+ * time-slice against the USB ISR task and drop UVC frames. Inference is delay-driven, not hard
+ * real-time, so a lower priority is fine. */
+#define TASK_PRIORITY            (configMAX_PRIORITIES - 3U)
 
 /* Enabling or disabling a MCWDT requires a wait time of upto 2 CLK_LF cycles  
  * to come into effect. This wait time value will depend on the actual CLK_LF  
@@ -391,15 +396,24 @@ int main(void)
     /* Enable global interrupts */
     __enable_irq();
 
-    /* Create the FreeRTOS Task */
+    /* Create the NPU inference task. */
     result = xTaskCreate(cm55_task, TASK_NAME,
                         TASK_STACK_SIZE, NULL,
                         TASK_PRIORITY, NULL);
-    if( pdPASS == result )
+    if( pdPASS != result )
     {
-        /* Start the RTOS Scheduler */
-        vTaskStartScheduler();
+        handle_app_error();
     }
+
+    /* USB-webcam capture + JPEG-encode tasks. They publish frames into the cam_shm SOCMEM mailbox
+     * for the CM33 to forward to edge.camera, and run alongside the NPU inference task on this core. */
+    if( !camera_stream_create_tasks() )
+    {
+        handle_app_error();
+    }
+
+    /* Start the RTOS Scheduler */
+    vTaskStartScheduler();
     return 0;
 }
 

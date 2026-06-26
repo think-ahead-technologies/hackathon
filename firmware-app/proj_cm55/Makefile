@@ -57,6 +57,9 @@ COMPONENTS+=FREERTOS RTOS_AWARE
 # ml-tflite-micro runtime interpreter + Ethos-U55 NPU (U55) + int8 kernels. CM55 is the
 # high-performance core that drives the NPU and runs the Vela-compiled wear model.
 COMPONENTS+=ML_TFLM ML_INT8x8 U55
+# emUSB-Host (SEGGER, object-code middleware): the USB host stack the UVC webcam capture uses.
+# Pulled in via deps/emusb-host.mtb + COMPONENT_PSE84 config under imports/.
+COMPONENTS+=USBH_BASE
 
 # Like COMPONENTS, but disable optional code that was enabled by default.
 DISABLE_COMPONENTS=
@@ -70,15 +73,21 @@ FW_SRC := ../../firmware/src
 SOURCES+=$(FW_SRC)/features.c \
          $(FW_SRC)/score.c \
          $(FW_SRC)/model_vela_data.c \
-         $(FW_SRC)/npu_infer.c
+         $(FW_SRC)/npu_infer.c \
+         $(FW_SRC)/cam_change.c
 
 # Like SOURCES, but for include directories. Value should be paths to
 # directories (without a leading -I).
 INCLUDES+=../../firmware/include
+# UVC camera capture + JPEG encoder (camera/) and the emUSB-Host config (imports/).
+INCLUDES+=camera
 
 # Add additional defines to the build process (without a leading -D).
 DEFINES+=CY_RETARGET_IO_CONVERT_LF_TO_CRLF
 DEFINES+=TF_LITE_STATIC_MEMORY TF_LITE_STRIP_ERROR_STRINGS
+# Camera frame geometry + emUSB-on-FreeRTOS blocking API; UVC capture is Wi-Fi-path only.
+DEFINES+=CAMERA_WIDTH=320 CAMERA_HEIGHT=240
+DEFINES+=_BAREMETAL=0 USE_BLOCKING_API USBH_DISABLE_STANDARD_OUTPUT
 
 # Select softfp or hardfp floating point. Default is softfp.
 VFP_SELECT+=
