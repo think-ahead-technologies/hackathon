@@ -48,9 +48,11 @@ typedef struct {
     volatile uint32_t reader_slot;  // slot the CM33 is reading (CAM_SLOT_NONE = none)
     volatile uint32_t seq[CAM_SHM_NUM_SLOTS];   // per-slot seqlock (odd = writer active)
     volatile uint32_t size[CAM_SHM_NUM_SLOTS];  // JPEG byte count per slot
+    volatile uint32_t t_us[CAM_SHM_NUM_SLOTS];  // device capture time (us) of the frame in each slot
     volatile uint32_t frames_captured;          // raw frames seen (diag)
     volatile uint32_t frames_published;         // encoded frames (diag)
     volatile uint32_t encode_errors;            // diag
+    volatile uint32_t frames_dropped_torn;      // frames discarded by the raw-buffer tear guard (diag)
 } cam_shm_hdr_t;
 
 // Slots start at a fixed offset so the header can grow a little without moving the data.
@@ -66,6 +68,8 @@ _Static_assert(CAM_SHM_OFFSET >= SHARED_CTRL_OFFSET + sizeof(shared_model_ctrl_t
 _Static_assert(CAM_SHM_OFFSET + CAM_SHM_SLOT_OFFSET + CAM_SHM_NUM_SLOTS * CAM_SHM_SLOT_SIZE
                    <= CAM_SHM_REGION_SIZE,
                "cam_shm slots exceed the m33_m55_shared region");
+_Static_assert(sizeof(cam_shm_hdr_t) <= CAM_SHM_SLOT_OFFSET,
+               "cam_shm header grew past the slot data offset");
 
 #ifdef __cplusplus
 }

@@ -42,6 +42,9 @@
 #define DEPLOY_SUB  "models." LINE ".artifact"
 // Contract: edge.camera.<line>.<container> — per-frame JPEG, published straight to NATS (binary body).
 #define CAMERA_DATA_SUBJECT "edge.camera." LINE "." CONTAINER
+// Max camera frames to drain per session-loop pass — matches the cam_shm slot count (at most that
+// many frames can be pending), so the camera rate isn't throttled to the NATS recv-timeout cadence.
+#define CAM_PUB_PER_LOOP    3
 // Contract E directed-gather: the platform commands a capture on .cmd; the device streams the
 // gathered feature windows back on .data. The .data sink is deliberately OFF edge.> — the Vector
 // minimization boundary blocks raw/features there; operator-gated training capture is the
@@ -438,10 +441,15 @@ static void nats_session_run(int sock) {
         }
 
         // Camera frames publish independently of the inference cadence (their own rate, not the
-        // CM55 score seq): poll the camera HAL and PUB any new JPEG to edge.camera. Dormant until
-        // the capture pipeline is ported (the hal_camera stub returns no frame). A transport error
-        // here ends the session so the caller reconnects, same as a failed score publish.
-        if (camera_publish_step(sock, CAMERA_DATA_SUBJECT) < 0) return;
+        // CM55 score seq). Drain every frame ready since the last poll — bounded by CAM_PUB_PER_LOOP
+        // — so the camera rate tracks the capture rate instead of being throttled to one frame per
+        // recv-timeout window. drop-to-newest still applies via the slot reservation; a transport
+        // error ends the session so the caller reconnects, same as a failed score publish.
+        for (int cam_i = 0; cam_i < CAM_PUB_PER_LOOP; cam_i++) {
+            int cam_rc = camera_publish_step(sock, CAMERA_DATA_SUBJECT);
+            if (cam_rc < 0) return;   // transport gone
+            if (cam_rc == 0) break;   // no more frames ready this poll
+        }
 
         // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score (and, while
         // shadowing a candidate, the candidate's score on the same window) arrive over the shared

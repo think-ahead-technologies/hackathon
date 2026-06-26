@@ -81,7 +81,7 @@ bool hal_camera_frame_get(const uint8_t **jpeg, uint32_t *len, hal_cam_meta_t *m
     meta->frame_id = frame_id;
     meta->width    = shm->width;
     meta->height   = shm->height;
-    meta->t_us     = 0u;   // device frame clock not carried in cam_shm; frame_id is the counter
+    meta->t_us     = shm->t_us[slot];   // device capture time the CM55 stamped for this slot
     return true;
 }
 

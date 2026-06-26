@@ -453,8 +453,19 @@ static void camera_encoder_task(void *arg)
     cam_shm_hdr_t *shm    = CAM_SHM_HDR;
     static cam_change_state_t s_change;   /* luma signature of the last published frame */
 
+    static uint32_t s_last_cam_state = CAM_STATE_NO_CAMERA;
+
     for (;;)
     {
+        /* Reset change-detection across a disconnect/reconnect so the first frame of a new stream
+         * always publishes — its scene is unrelated to whatever was framed before the gap. */
+        uint32_t cam_state = shm->camera_state;
+        if (cam_state != s_last_cam_state)
+        {
+            if (cam_state != CAM_STATE_STREAMING) s_change.have = false;
+            s_last_cam_state = cam_state;
+        }
+
         if (s_capture_count == last_encoded)
         {
             vTaskDelay(pdMS_TO_TICKS(5));
@@ -510,9 +521,18 @@ static void camera_encoder_task(void *arg)
                                          JPEG_QUALITY,
                                          slot, CAM_JPEG_MAX);
 
-        if (jpeg_size > 0)
+        /* Raw-buffer tear guard: only NUM_IMAGE_BUFFERS raw buffers exist and the encoder runs
+         * below the USB tasks, so _cbOnData may have recycled buf_idx during this (slow) encode.
+         * The producer clears BufReady the instant it starts overwriting a buffer, so a now-clear
+         * BufReady means the JPEG may be of a half-overwritten frame -> discard it (the wire CRC /
+         * TLS cannot catch raw-side tearing). */
+        bool torn = !s_image_buf[buf_idx].BufReady;
+
+        if (jpeg_size > 0 && !torn)
         {
             shm->size[next_slot] = (uint32_t)jpeg_size;
+            shm->t_us[next_slot] = (uint32_t)(xTaskGetTickCount() *
+                                              (1000000u / configTICK_RATE_HZ));
             __DMB();
             shm->seq[next_slot]++;      /* even: stable */
             __DMB();
@@ -524,9 +544,10 @@ static void camera_encoder_task(void *arg)
         }
         else
         {
-            shm->seq[next_slot]++;      /* restore even on failure */
+            shm->seq[next_slot]++;      /* restore even on encode failure or a torn raw frame */
             __DMB();
-            shm->encode_errors++;
+            if (torn) shm->frames_dropped_torn++;
+            else      shm->encode_errors++;
         }
         shm->frames_captured = s_capture_count;
     }
