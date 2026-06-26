@@ -24,6 +24,29 @@ test: $(BUILD)/tests
 $(BUILD)/tests: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
 	$(CC) $(CFLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $@
 
+## test-san: run the unit tests under AddressSanitizer + UndefinedBehaviorSanitizer.
+## Catches out-of-bounds access and integer/UB the plain build can't see — the parsers
+## are driven with adversarial input, so this is where a bad offset/memcpy surfaces.
+## -fno-sanitize-recover=all makes the first finding a hard, non-zero exit (CI-friendly).
+SAN_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all -g -O1
+.PHONY: test-san
+test-san: $(BUILD)/tests_san
+	ASAN_OPTIONS=abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 ./$(BUILD)/tests_san
+
+$(BUILD)/tests_san: $(LOGIC_SRC) $(TEST_SRC) | $(BUILD)
+	$(CC) $(CFLAGS) $(SAN_FLAGS) -iquote test $(LOGIC_SRC) $(TEST_SRC) -o $@
+
+## lint: static analysis with cppcheck (install: brew install cppcheck).
+## Scans every src/ file — including the on-target HAL/orchestration the host build skips
+## — for the bounds/overflow/uninitialized family. Missing BSP headers are tolerated, not
+## errors. --error-exitcode=1 fails CI on any finding; inline // cppcheck-suppress for VERIFY seams.
+.PHONY: lint
+lint:
+	@command -v cppcheck >/dev/null 2>&1 || { echo "cppcheck not found — install with: brew install cppcheck"; exit 1; }
+	cppcheck --enable=warning,style,performance,portability --std=c11 \
+	         --inline-suppr --suppress=missingIncludeSystem --suppress=missingInclude \
+	         --error-exitcode=1 --quiet -I include src
+
 ## crosslang: prove deploy_frame.py output parses byte-identically through the C deploy/manifest code
 .PHONY: crosslang
 crosslang: $(BUILD)/harness_deploy

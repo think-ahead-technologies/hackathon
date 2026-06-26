@@ -68,6 +68,8 @@ static bool value_is_true(const char *p, const char *end) {
     while (p < end && is_ws(*p)) {
         p++;
     }
+    // cppcheck-suppress knownConditionTrueFalse  // FP: cppcheck assumes the ws-skip ran to
+    // `end`; on the {"stop":true} path p lands on 't' with >=4 bytes left (test_capture.c).
     return (size_t)(end - p) >= 4 && memcmp(p, "true", 4) == 0;
 }
 
@@ -77,6 +79,7 @@ bool capture_parse_cmd(const uint8_t *buf, size_t len, capture_cmd_t *out) {
 
     // A stop command ({"stop":true}) clears the watch-set; it carries no segment.
     const char *p = value_after(j, len, "\"stop\"");
+    // cppcheck-suppress knownConditionTrueFalse  // FP propagated from value_is_true (see above).
     if (p && value_is_true(p, j + len)) {
         out->stop = true;
         return true;

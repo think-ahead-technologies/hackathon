@@ -45,6 +45,13 @@ make test        # cc -Wall -Wextra -Werror; runs all suites
 178 checks, 0 failures
 ```
 
+The same suite runs under sanitizers and static analysis:
+
+```bash
+make test-san   # ASan + UBSan — the adversarial parser tests catch bad offsets/overflow here
+make lint       # cppcheck static analysis (brew install cppcheck)
+```
+
 ### Cross-language wire-format test
 
 ```bash
