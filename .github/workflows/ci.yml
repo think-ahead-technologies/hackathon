@@ -64,9 +64,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install deps
-        run: pip install cryptography
+        run: |
+          pip install cryptography
+          sudo apt-get update && sudo apt-get install -y cppcheck
       - name: Unit tests (host logic)
         run: make -C firmware test
+      - name: Unit tests under ASan + UBSan
+        run: make -C firmware test-san
+      - name: Static analysis (cppcheck)
+        run: make -C firmware lint
       # These import the Platform-side framer/provisioning from pipeline/ via a
       # repo-relative sys.path, so no PYTHONPATH is needed.
       - name: Cross-language wire-format test
