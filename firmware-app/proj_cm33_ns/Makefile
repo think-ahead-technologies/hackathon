@@ -81,6 +81,7 @@ SOURCES+=$(FW_SRC)/model_slot.c \
          $(FW_SRC)/manifest.c \
          $(FW_SRC)/deploy.c \
          $(FW_SRC)/capture.c \
+         $(FW_SRC)/json_scan.c \
          $(FW_SRC)/score.c \
          $(FW_SRC)/platform_hal_pse84.c \
          $(FW_SRC)/model_loader_cm33.c \
