@@ -33,7 +33,8 @@
 // ---- BSP / middleware headers (present only in the on-target MTB build) -----
 #include "cybsp.h"
 #ifndef HAL_FLASH_STUB
-#include "cy_serial_flash_qspi.h"   // SMIF serial-flash middleware
+#include "cy_smif.h"                // SMIF PDL low-level (Cy_SMIF_Init / SetMode / Enable)
+#include "cy_smif_memslot.h"        // SMIF PDL memory-slot API (Cy_SMIF_Mem{Init,Read,Write,EraseSector})
 #include "cycfg_qspi_memslot.h"     // QSPI Configurator block config (smifBlockConfig)
 #endif
 #include "psa/crypto.h"             // PSA Crypto (Mbed TLS / TF-M backed)
@@ -53,15 +54,17 @@
 // copy-selection logic live in meta_store.h/.c — pure, host-tested.
 
 // -----------------------------------------------------------------------------
-//  QSPI NOR flash (SMIF serial-flash middleware)
-//  init is expected to have run at boot: cy_serial_flash_qspi_init(...). The
-//  config struct comes from the QSPI Configurator (cycfg_qspi_memslot.h).
+//  QSPI NOR flash (SMIF PDL memory-slot API)
+//  hal_flash_init() brings up the SMIF controller and the NOR device from the
+//  configurator-generated config (cycfg_qspi_memslot.h smifBlockConfig + the
+//  CYBSP_SMIF_CORE_0_XSPI_FLASH_* controller config). The PSE84 (CAT1D) part ships
+//  the new mtb-hal, not the legacy cyhal, so the cy_serial_flash_qspi middleware
+//  (cyhal-only) cannot be used here — the PDL Cy_SMIF_Mem* layer it wrapped is.
 //
 //  HAL_FLASH_STUB: the connectivity-first firmware-app build defines this to get a
-//  no-persistence backend — model slots aren't wired to QSPI yet (E84 serial-flash
-//  bring-up is pending; serial-flash v1.4.3 is the legacy cyhal/CAT1A API). With the
-//  stub, hal_flash_* fail benignly so an inbound Contract C deploy aborts cleanly
-//  instead of corrupting anything, while the Wi-Fi/TLS/NATS publish path runs for real.
+//  no-persistence backend — model slots aren't wired to QSPI yet. With the stub,
+//  hal_flash_* fail benignly so an inbound Contract C deploy aborts cleanly instead
+//  of corrupting anything, while the Wi-Fi/TLS/NATS publish path runs for real.
 // -----------------------------------------------------------------------------
 
 // Model-slot base offsets — shared by both backends (the stub uses them for its default metadata
@@ -117,50 +120,85 @@ bool hal_meta_write(const model_meta_t *m) {
 // On CAT1 parts this is the SMIF XIP region base (e.g. CY_XIP_BASE); confirm for E84.
 // Must match npu_infer.c's SMIF_XIP_BASE — both cores read the same flash.
 #define SMIF_XIP_BASE       (0x60000000u)
-// VERIFY: QSPI bus clock for the E84 board's flash part (Hz).
-#define QSPI_BUS_FREQUENCY_HZ (50000000UL)
+// VERIFY: SMIF controller init timeout (us) for the E84 board's flash part.
+#define SMIF_INIT_TIMEOUT_US (1000UL)
+
+// The SMIF instance and configs that carry the model/metadata QSPI NOR flash come from the
+// Device/QSPI Configurator (the S25HS512T part on SMIF0 slot 0): CYBSP_SMIF_CORE_0_XSPI_FLASH_HW
+// is the SMIF base, CYBSP_SMIF_CORE_0_XSPI_FLASH_config the controller config, and smifBlockConfig
+// the memory-slot block config (from cycfg_qspi_memslot.h).
+#define FLASH_SMIF_HW  CYBSP_SMIF_CORE_0_XSPI_FLASH_HW
+#define FLASH_SMIF_CFG (&CYBSP_SMIF_CORE_0_XSPI_FLASH_config)
+
+static cy_stc_smif_context_t g_smif_ctx;
+
+// The single configured NOR device. The Cy_SMIF_Mem* ops take the per-device config; the block
+// config carries the array the Configurator generated (one device on this board).
+static cy_stc_smif_mem_config_t *flash_mem(void) {
+    return smifBlockConfig.memConfig[0];
+}
+
+// Command (MMIO) mode is required for Cy_SMIF_Mem{Read,Write,EraseSector}; XIP (memory-mapped) mode
+// is required for the pointer hal_flash_xip_map hands back. XIP is the resting mode so those
+// pointers stay valid between calls; each command-mode op brackets itself and restores XIP. This is
+// the QSPI *data* flash — the NS image runs from RRAM, so toggling SMIF mode never pulls code out
+// from under us. (The legacy serial-flash middleware did this mode dance internally.)
+static void flash_cmd_mode(void) { Cy_SMIF_SetMode(FLASH_SMIF_HW, CY_SMIF_NORMAL); }
+static void flash_xip_mode(void) { Cy_SMIF_SetMode(FLASH_SMIF_HW, CY_SMIF_MEMORY); }
 
 bool hal_flash_init(void) {
-    // Bring up the SMIF serial flash, then enable XIP once so hal_flash_xip_map just returns an
-    // address. VERIFY: the init signature for the E84 serial-flash middleware version (legacy cyhal
-    // vs mtb-hal), the QSPI Configurator block config (smifBlockConfig.memConfig[0]) and the
-    // CYBSP_QSPI_* pin symbols from the Device Configurator.
-    if (cy_serial_flash_qspi_init(smifBlockConfig.memConfig[0],
-                                  CYBSP_QSPI_D0, CYBSP_QSPI_D1, CYBSP_QSPI_D2, CYBSP_QSPI_D3,
-                                  NC, NC, NC, NC, CYBSP_QSPI_SCK, CYBSP_QSPI_SS,
-                                  QSPI_BUS_FREQUENCY_HZ) != CY_RSLT_SUCCESS) {
+    // Bring up the SMIF controller from the generated config, init the NOR device(s) from the QSPI
+    // Configurator block config, then leave the block memory-mapped (XIP) so hal_flash_xip_map just
+    // returns an address.
+    // VERIFY on-target: that the SMIF controller isn't already brought up by cybsp_init() (a second
+    // Cy_SMIF_Init would fault); the init timeout; and the slot-0 data/slave-select wiring.
+    if (Cy_SMIF_Init(FLASH_SMIF_HW, FLASH_SMIF_CFG, SMIF_INIT_TIMEOUT_US, &g_smif_ctx)
+            != CY_SMIF_SUCCESS) {
         return false;
     }
-    return cy_serial_flash_qspi_enable_xip(true) == CY_RSLT_SUCCESS;
+    Cy_SMIF_Enable(FLASH_SMIF_HW, &g_smif_ctx);
+    if (Cy_SMIF_MemInit(FLASH_SMIF_HW, &smifBlockConfig, &g_smif_ctx) != CY_SMIF_SUCCESS) {
+        return false;
+    }
+    flash_xip_mode();
+    return true;
 }
 
 bool hal_flash_erase(uint32_t offset, uint32_t len) {
-    // VERIFY: erase granularity — must be sector-aligned; the middleware erases
-    // whole sectors. Round/align offset+len to the device sector size.
-    return cy_serial_flash_qspi_erase(offset, len) == CY_RSLT_SUCCESS;
+    // Cy_SMIF_MemEraseSector needs command mode and a sector-aligned offset + sector-multiple
+    // length; the caller (hal_meta_write) aligns to the device sector size.
+    flash_cmd_mode();
+    cy_en_smif_status_t s = Cy_SMIF_MemEraseSector(FLASH_SMIF_HW, flash_mem(), offset, len,
+                                                   &g_smif_ctx);
+    flash_xip_mode();
+    return s == CY_SMIF_SUCCESS;
 }
 
 bool hal_flash_program(uint32_t offset, const uint8_t *data, uint32_t len) {
-    // VERIFY: write granularity (page program size, typically 256 B). The
-    // middleware handles page splitting in recent versions; confirm for E84.
-    return cy_serial_flash_qspi_write(offset, len, data) == CY_RSLT_SUCCESS;
+    // Cy_SMIF_MemWrite handles page-program splitting and write-enable / WIP polling internally.
+    flash_cmd_mode();
+    cy_en_smif_status_t s = Cy_SMIF_MemWrite(FLASH_SMIF_HW, flash_mem(), offset, data, len,
+                                             &g_smif_ctx);
+    flash_xip_mode();
+    return s == CY_SMIF_SUCCESS;
 }
 
 const uint8_t *hal_flash_xip_map(uint32_t offset) {
-    // XIP (memory-mapped) mode is enabled once at boot (cy_serial_flash_qspi_enable_xip in the
-    // board bring-up), so the flatbuffer is directly addressable here — just return its address.
-    // The serial-flash middleware re-enters command mode internally for erase/program, so writes
-    // to the inactive slot still work with XIP enabled.
-    // VERIFY: SMIF_XIP_BASE for the E84, and that erase/program coexist with XIP on this middleware
-    // version (older serial-flash needs an explicit enable_xip(false) around writes).
+    // XIP (memory-mapped) mode is the resting mode (hal_flash_init + the erase/program brackets
+    // restore it), so the flatbuffer is directly addressable here — just return its address.
+    // VERIFY: SMIF_XIP_BASE for the E84 matches the configured baseAddress for slot 0.
     return (const uint8_t *)(SMIF_XIP_BASE + offset);
 }
 
 static bool read_both_copies(meta_blob_t *a, meta_blob_t *b) {
-    return cy_serial_flash_qspi_read(META_FLASH_OFFSET_A, sizeof(*a), (uint8_t *)a)
-               == CY_RSLT_SUCCESS &&
-           cy_serial_flash_qspi_read(META_FLASH_OFFSET_B, sizeof(*b), (uint8_t *)b)
-               == CY_RSLT_SUCCESS;
+    // Cy_SMIF_MemRead is a command-mode read; bracket back to XIP so xip_map pointers stay valid.
+    flash_cmd_mode();
+    cy_en_smif_status_t sa = Cy_SMIF_MemRead(FLASH_SMIF_HW, flash_mem(), META_FLASH_OFFSET_A,
+                                             (uint8_t *)a, sizeof(*a), &g_smif_ctx);
+    cy_en_smif_status_t sb = Cy_SMIF_MemRead(FLASH_SMIF_HW, flash_mem(), META_FLASH_OFFSET_B,
+                                             (uint8_t *)b, sizeof(*b), &g_smif_ctx);
+    flash_xip_mode();
+    return sa == CY_SMIF_SUCCESS && sb == CY_SMIF_SUCCESS;
 }
 
 bool hal_meta_read(model_meta_t *out) {
@@ -199,16 +237,15 @@ bool hal_meta_write(const model_meta_t *m) {
     blob.meta = *m;
     meta_blob_finalize(&blob);  // stamps magic + crc
 
-    // cy_serial_flash_qspi_erase requires a sector-aligned offset and a sector-multiple length, so
-    // erase the whole metadata sector (the blob fits within one). VERIFY: sizeof(meta_blob_t) does
-    // not exceed the device sector size at this offset.
-    size_t sector = cy_serial_flash_qspi_get_erase_size(off);
-    if (sector == 0 || sizeof(blob) > sector ||
-        cy_serial_flash_qspi_erase(off, sector) != CY_RSLT_SUCCESS) {
+    // hal_flash_erase requires a sector-aligned offset and a sector-multiple length, so erase the
+    // whole metadata sector (the blob fits within one). The device sector size comes from the
+    // configurator block config. VERIFY: sizeof(meta_blob_t) does not exceed the device sector size
+    // at this offset, and that META_FLASH_OFFSET_A/B are sector-aligned.
+    size_t sector = flash_mem()->deviceCfg->eraseSize;
+    if (sector == 0 || sizeof(blob) > sector || !hal_flash_erase(off, sector)) {
         return false;
     }
-    return cy_serial_flash_qspi_write(off, sizeof(blob), (const uint8_t *)&blob)
-           == CY_RSLT_SUCCESS;
+    return hal_flash_program(off, (const uint8_t *)&blob, sizeof(blob));
 }
 
 #endif  // HAL_FLASH_STUB
