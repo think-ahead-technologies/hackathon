@@ -81,7 +81,7 @@ def test_seed_file_has_no_trailing_newline(tmp_path):
 def test_config_carries_least_privilege_subjects_verbatim():
     identities = provision.build_identities({"devices": [{"id": "cnc-7", "line": "line1"}], "services": []})
     conf = provision.render_server_config(identities)
-    assert 'publish = { allow = ["edge.line1.cnc-7"] }' in conf
+    assert 'publish = { allow = ["edge.line1.cnc-7", "capture.line1.cnc-7.data"] }' in conf
 
 
 def test_tls_block_is_opt_in():
