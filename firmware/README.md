@@ -42,7 +42,7 @@ make test        # cc -Wall -Wextra -Werror; runs all suites
 ```
 
 ```
-130 checks, 0 failures
+178 checks, 0 failures
 ```
 
 ### Cross-language wire-format test

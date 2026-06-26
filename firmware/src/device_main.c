@@ -225,7 +225,9 @@ static void deploy_on_model_chunk(const deploy_hdr_t *h, const uint8_t *payload)
 static void deploy_on_frame(const deploy_hdr_t *h, const uint8_t *payload) {
     switch (h->part) {
         case DEPLOY_PART_MANIFEST:
-            if ((size_t)h->offset + h->chunk_len <= sizeof(g_dep.manifest)) {
+            // uint64 add so a crafted offset near UINT32_MAX can't wrap a 32-bit sum past the
+            // bound and slip a wild memcpy through — same guard the model path uses (deploy.c).
+            if ((uint64_t)h->offset + h->chunk_len <= sizeof(g_dep.manifest)) {
                 memcpy(g_dep.manifest + h->offset, payload, h->chunk_len);
                 if (h->flags & DEPLOY_FLAG_LAST) {
                     g_dep.manifest_len = h->offset + h->chunk_len;
