@@ -22,10 +22,13 @@ FLEET = {
 
 def test_device_is_scoped_to_its_own_subject():
     perms = provision.permissions_for("device", "line1", "cnc-7")
-    assert perms["publish"] == ["edge.line1.cnc-7"]
-    # It can receive its own rollouts/control but cannot publish anywhere else.
+    # Publishes only its own telemetry + its own Contract E capture sink — every publish subject is
+    # scoped to this container, never another board's.
+    assert perms["publish"] == ["edge.line1.cnc-7", "capture.line1.cnc-7.data"]
+    assert all("cnc-7" in p for p in perms["publish"])
+    # It can receive its own rollouts/control + its own capture commands, but cannot publish elsewhere.
     assert "models.line1.deploy" in perms["subscribe"]
-    assert all(p == "edge.line1.cnc-7" for p in perms["publish"])
+    assert "capture.line1.cnc-7.cmd" in perms["subscribe"]
 
 
 def test_a_device_cannot_publish_as_another_device():

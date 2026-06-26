@@ -18,10 +18,12 @@ TLS_HOSTNAMES = ["nats", "localhost", "127.0.0.1"]
 # publish as another container or reach the control/JetStream planes. Services get exactly
 # the subjects their code uses (confirmed against bridge/main.py, vector.yaml, fakegen, publish_artifact).
 ROLE_TEMPLATES = {
-    # A device publishes only its own telemetry and listens only for its own model rollouts + control.
+    # A device publishes only its own telemetry (+ its own operator-gated Contract E capture sink)
+    # and listens only for its own model rollouts, control, and Contract E capture commands.
     "device": lambda line, cid: {
-        "publish": [f"edge.{line}.{cid}"],
-        "subscribe": [f"models.{line}.deploy", f"models.{line}.artifact", f"control.{line}"],
+        "publish": [f"edge.{line}.{cid}", f"capture.{line}.{cid}.data"],
+        "subscribe": [f"models.{line}.deploy", f"models.{line}.artifact", f"control.{line}",
+                      f"capture.{line}.{cid}.cmd"],
     },
     # Vector boundary gateway: consume the whole device plane, forward only inference.
     "vector": lambda line, cid: {
