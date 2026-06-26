@@ -57,4 +57,21 @@ int nats_build_pub(char *buf, size_t cap, const char *subject,
 // (no reply) and 4-token (with reply-to) forms. Returns false on a malformed header.
 bool nats_parse_msg_header(const char *line, nats_msg_t *out);
 
+// What to do with an inbound MSG body, decided purely from its parsed header. The caller MUST
+// consume exactly payload_len body bytes whatever the route — DRAIN is the explicit "consume and
+// discard" path, so an unknown subject or an oversized body can never leave payload in the socket
+// and desync the next read.
+typedef enum {
+    NATS_ROUTE_DEPLOY,   // Contract C: read the body into the deploy buffer, parse a frame
+    NATS_ROUTE_CAPTURE,  // Contract E: read the body into the command buffer, parse a command
+    NATS_ROUTE_DRAIN,    // unknown subject, or body too large for its buffer -> consume + discard
+} nats_route_t;
+
+// Route a parsed MSG: DEPLOY or CAPTURE when the subject matches AND the body fits that handler's
+// buffer; otherwise DRAIN. `deploy_cap`/`capture_cap` are the handler buffer sizes the caller will
+// recv the body into — a body larger than its buffer routes to DRAIN rather than being truncated.
+nats_route_t nats_route_msg(const nats_msg_t *msg,
+                            const char *deploy_sub, uint32_t deploy_cap,
+                            const char *capture_sub, uint32_t capture_cap);
+
 #endif  // NATS_PROTO_H

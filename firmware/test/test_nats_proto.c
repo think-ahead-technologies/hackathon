@@ -89,4 +89,42 @@ void run_nats_proto_tests(void) {
     // ---- malformed header -> rejected ----
     nats_msg_t bad;
     CHECK(nats_parse_msg_header("MSG onlysubject", &bad) == false);
+
+    // ---- MSG routing (the desync-prevention decision) ----
+    // The device serves two subjects; every other MSG, and any body too big for its handler
+    // buffer, MUST route to DRAIN so the body is still consumed and the stream stays framed.
+    const char *dsub = "models.line1.artifact";   // Contract C deploy stream
+    const char *csub = "capture.line1.cnc-7.cmd";  // Contract E capture commands
+    const uint32_t DCAP = 4100;                     // deploy handler buffer (hdr + one chunk)
+    const uint32_t CCAP = 512;                      // capture command buffer
+    nats_msg_t route;
+
+    // Deploy subject, body within the buffer -> route to the deploy handler.
+    CHECK(nats_parse_msg_header("MSG models.line1.artifact 1 2048", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DEPLOY);
+
+    // Body exactly the buffer size is still acceptable (boundary).
+    CHECK(nats_parse_msg_header("MSG models.line1.artifact 1 4100", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DEPLOY);
+
+    // One byte over the buffer -> DRAIN, NOT silently skipped. This is the case that desynced the
+    // stream before the fix: the body was left in the socket and read back as a protocol line.
+    CHECK(nats_parse_msg_header("MSG models.line1.artifact 1 4101", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DRAIN);
+
+    // Capture subject, command within the buffer -> route to the capture handler.
+    CHECK(nats_parse_msg_header("MSG capture.line1.cnc-7.cmd 2 128", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_CAPTURE);
+
+    // Oversized capture command -> DRAIN.
+    CHECK(nats_parse_msg_header("MSG capture.line1.cnc-7.cmd 2 513", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DRAIN);
+
+    // A subject we don't serve -> DRAIN regardless of how small the body is.
+    CHECK(nats_parse_msg_header("MSG edge.line1.cnc-7 9 16", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DRAIN);
+
+    // A reply-to subject form still routes by the delivered subject + byte count.
+    CHECK(nats_parse_msg_header("MSG models.line1.artifact 1 _INBOX.x 64", &route) == true);
+    CHECK(nats_route_msg(&route, dsub, DCAP, csub, CCAP) == NATS_ROUTE_DEPLOY);
 }

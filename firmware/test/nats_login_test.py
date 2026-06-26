@@ -56,6 +56,28 @@ def read_info(sock: socket.socket) -> bytes:
     return buf
 
 
+def do_handshake(sock: socket.socket, h: str, cnc: dict) -> bytes:
+    """Run the device's session-open sequence (the bytes nats_session_open emits) against the
+    server and return the nonce used: parse nonce (C), sign it, base64 it (C), build CONNECT (C),
+    SUB, PING. Re-run verbatim on each reconnect, exactly as the firmware's session loop does."""
+    info = read_info(sock)
+    assert info.startswith(b"INFO "), f"expected INFO, got {info!r}"
+    nonce = harness(h, "nonce", info.decode().strip()).strip()
+    assert nonce, "C parser found no nonce in INFO (auth not requested?)"
+    sig = sign_nonce(cnc["seed"], nonce)
+    sigb64 = harness(h, "b64", sig.hex()).strip().decode()
+    sock.sendall(harness(h, "connect", "cnc-7", cnc["public"], sigb64))
+    # Re-subscribe to BOTH device subjects, exactly as device_main does after CONNECT: the Contract C
+    # deploy stream and the Contract E capture-command subject. Both must be in the device's
+    # provisioned subscribe allow-list (provision.py) — a Permissions Violation on either fails here,
+    # so this guards the firmware-vs-provisioning subject contract going forward.
+    sock.sendall(b"SUB models.line1.artifact 1\r\nSUB capture.line1.cnc-7.cmd 2\r\n")
+    sock.sendall(b"PING\r\n")
+    resp = recv_some(sock)
+    assert b"PONG" in resp and b"-ERR" not in resp, f"login/sub rejected: {resp!r}"
+    return nonce
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("usage: nats_login_test.py <harness-binary>")
@@ -77,21 +99,10 @@ def main() -> int:
         try:
             time.sleep(2)
 
-            # 2) Authorized login: parse nonce (C), sign it, base64 it (C), build CONNECT (C), send.
+            # 2) Authorized login: run the device's session-open sequence (real C nonce parse +
+            #    base64 + CONNECT build) against the server.
             s = socket.create_connection(("127.0.0.1", PORT), timeout=2.0)
-            info = read_info(s)
-            assert info.startswith(b"INFO "), f"expected INFO, got {info!r}"
-
-            nonce = harness(h, "nonce", info.decode().strip()).strip()
-            assert nonce, "C parser found no nonce in INFO (auth not requested?)"
-            sig = sign_nonce(cnc["seed"], nonce)
-            sigb64 = harness(h, "b64", sig.hex()).strip().decode()
-            connect = harness(h, "connect", "cnc-7", cnc["public"], sigb64)
-            s.sendall(connect)
-            s.sendall(b"PING\r\n")
-            resp = recv_some(s)
-            assert b"PONG" in resp and b"-ERR" not in resp, \
-                f"authorized login rejected: {resp!r}"
+            do_handshake(s, h, cnc)
 
             # 3) Least-privilege: own subject OK, another device's subject denied.
             s.sendall(b"PUB edge.line1.cnc-7 2\r\nhi\r\n")
@@ -106,7 +117,30 @@ def main() -> int:
                 f"expected a permissions violation publishing as press-3, got {resp!r}"
             s.close()
 
-            # 4) Anonymous CONNECT (no creds) must be rejected.
+            # 4) Reconnect: the device re-runs its whole open() sequence on a fresh socket after a
+            #    transport drop. Prove (a) the new connection issues a FRESH nonce, (b) re-signing it
+            #    with the real C code re-authenticates, (c) the re-SUB + own-subject publish work.
+            #    Caching the first signature would fail here — which is why the firmware re-signs on
+            #    every reconnect rather than reusing it.
+            s1 = socket.create_connection(("127.0.0.1", PORT), timeout=2.0)
+            nonce1 = do_handshake(s1, h, cnc)
+            # Simulate the drop the reconnect logic recovers from. Client-close models the device's
+            # post-detection re-open (it reconnects regardless of *why* the link dropped). For a
+            # server-initiated drop instead: `docker restart` the container, or send a protocol error.
+            s1.close()
+
+            s2 = socket.create_connection(("127.0.0.1", PORT), timeout=2.0)
+            nonce2 = do_handshake(s2, h, cnc)
+            assert nonce2 != nonce1, \
+                f"server reissued the same nonce on reconnect ({nonce1!r}); re-sign test is moot"
+            s2.sendall(b"PUB edge.line1.cnc-7 2\r\nok\r\n")
+            s2.sendall(b"PING\r\n")
+            resp = recv_some(s2)
+            assert b"PONG" in resp and b"-ERR" not in resp, \
+                f"own-subject publish after reconnect rejected: {resp!r}"
+            s2.close()
+
+            # 5) Anonymous CONNECT (no creds) must be rejected.
             a = socket.create_connection(("127.0.0.1", PORT), timeout=2.0)
             read_info(a)
             a.sendall(harness(h, "connect", "cnc-7", "", ""))  # empty nkey/sig => anonymous
@@ -119,7 +153,8 @@ def main() -> int:
             subprocess.run(["docker", "stop", CONTAINER], capture_output=True)
 
     print("nats login OK: our C CONNECT authenticated against a real nats-server; "
-          "own-subject publish accepted, cross-device denied, anonymous denied.")
+          "own-subject publish accepted, cross-device denied, reconnect re-authenticated "
+          "with a fresh nonce, anonymous denied.")
     return 0
 
 
