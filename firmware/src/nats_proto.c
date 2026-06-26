@@ -98,6 +98,13 @@ int nats_build_pub(char *buf, size_t cap, const char *subject,
     return (int)total;
 }
 
+int nats_build_pub_header(char *buf, size_t cap, const char *subject, size_t payload_len) {
+    // %lu + cast, not %zu: newlib-nano printf lacks the 'z' modifier (see nats_build_pub).
+    int hn = snprintf(buf, cap, "PUB %s %lu\r\n", subject, (unsigned long)payload_len);
+    if (hn < 0 || (size_t)hn >= cap) return -1;
+    return hn;
+}
+
 bool nats_parse_msg_header(const char *line, nats_msg_t *out) {
     // Work on a CRLF-stripped copy so we can tokenize in place.
     char tmp[160];

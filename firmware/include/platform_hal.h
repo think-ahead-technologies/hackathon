@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "model_slot.h"
+#include "camera_proto.h"   // hal_cam_meta_t
 
 // =============================================================================
 // WARNING — none of these signatures are verified against the real E84 BSP.
@@ -77,6 +78,18 @@ int  hal_tcp_recv_line(int sock, char *buf, size_t cap);
 int  hal_tcp_recv_exact(int sock, uint8_t *buf, size_t len);
 // Tear the current connection down (after a transport error, before reconnecting). Idempotent.
 void hal_tcp_close(int sock);
+
+// ---- USB-host UVC camera capture + on-device JPEG (CM55) -> edge.camera ------
+// Bring up the USB host stack + UVC webcam and start the JPEG encode pipeline. Call ONCE at boot.
+// Returns false if the stack/camera fails to come up. STUB until the capture pipeline is ported.
+bool hal_camera_init(void);
+// Non-blocking. If a NEW complete JPEG frame is ready since the last get/release, point `*jpeg` at
+// it (HAL-owned memory, valid only until hal_camera_frame_release) with its length in `*len` and
+// metadata in `*meta`, and return true. Returns false when no new frame is ready. The HAL may apply
+// change-detection so only frames that differ from the last one are surfaced (bandwidth control).
+bool hal_camera_frame_get(const uint8_t **jpeg, uint32_t *len, hal_cam_meta_t *meta);
+// Release the frame handed out by the last hal_camera_frame_get so the HAL can reuse its slot.
+void hal_camera_frame_release(void);
 
 // ---- On-device localization (track segment) --------------------------------
 // Copy the id of the track segment the device is in RIGHT NOW (e.g. "seg-4") into `out`,

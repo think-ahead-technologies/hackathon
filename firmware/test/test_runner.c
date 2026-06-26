@@ -15,6 +15,10 @@ int main(void) {
     run_shadow_tests();
     printf("nats_proto\n");
     run_nats_proto_tests();
+    printf("camera_proto\n");
+    run_camera_proto_tests();
+    printf("cam_change\n");
+    run_cam_change_tests();
     printf("meta_store\n");
     run_meta_store_tests();
     printf("manifest\n");

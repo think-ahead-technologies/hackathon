@@ -33,6 +33,8 @@ void run_model_slot_tests(void);
 void run_model_contract_tests(void);
 void run_shadow_tests(void);
 void run_nats_proto_tests(void);
+void run_camera_proto_tests(void);
+void run_cam_change_tests(void);
 void run_meta_store_tests(void);
 void run_manifest_tests(void);
 void run_deploy_tests(void);
