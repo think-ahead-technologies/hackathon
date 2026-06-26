@@ -48,7 +48,10 @@
  * Macros
  ******************************************************************************/
 #define TASK_NAME                ("CM55 Task")
-#define TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 4U)
+/* The task runs the spectrogram front-end (features_from_accel) and the TFLM/Ethos-U
+ * dispatch (npu_run), both of which carry deep call frames; the previous 2 KB was too
+ * tight. 8 KB leaves headroom — confirm against uxTaskGetStackHighWaterMark() on target. */
+#define TASK_STACK_SIZE          (configMINIMAL_STACK_SIZE * 16U)
 #define TASK_PRIORITY            (configMAX_PRIORITIES - 1U)
 
 /* Enabling or disabling a MCWDT requires a wait time of upto 2 CLK_LF cycles  
@@ -205,11 +208,23 @@ static void cm55_task(void * arg)
             last_cmd = ctrl->cmd_seq;
         }
 
-        /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. */
+        /* Sample one 4 s window of 3-axis accel at ~50 Hz from the BMI270. A transient I2C
+         * read failure would leave a stale/garbage sample in the window, so on any failed read
+         * drop the whole window rather than score (and publish) corrupted features. */
+        bool window_ok = true;
         for (int i = 0; i < FEAT_WINDOW_SAMPLES; i++)
         {
-            imu_read_accel_ms2(&accel_window[i * 3]);
+            if (!imu_read_accel_ms2(&accel_window[i * 3]))
+            {
+                window_ok = false;
+                break;
+            }
             vTaskDelay(pdMS_TO_TICKS(20));   /* ~50 Hz (FEAT_FS) */
+        }
+        if (!window_ok)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
         }
 
         /* Real front-end: accel window -> spectrogram int8 -> NPU model -> L2 score. */
