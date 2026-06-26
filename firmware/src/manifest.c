@@ -4,48 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "json_scan.h"
 #include "manifest.h"
-
-// Bounded substring search (no NUL assumption on the input).
-static const char *mem_find(const char *hay, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hlen) {
-        return NULL;
-    }
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        if (memcmp(hay + i, needle, nlen) == 0) {
-            return hay + i;
-        }
-    }
-    return NULL;
-}
-
-static int is_ws(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-// Return the value position just after `"key" :` (whitespace skipped), within [hay, hay+hlen).
-static const char *value_after(const char *hay, size_t hlen, const char *quoted_key) {
-    const char *k = mem_find(hay, hlen, quoted_key);
-    if (!k) {
-        return NULL;
-    }
-    const char *p = k + strlen(quoted_key);
-    const char *end = hay + hlen;
-    while (p < end && (is_ws(*p) || *p == ':')) {
-        p++;
-    }
-    return (p < end) ? p : NULL;
-}
 
 // Copy a numeric token (until a JSON delimiter) into a NUL-terminated scratch buffer.
 // Returns the position just past the token so the caller can continue scanning.
 static const char *copy_token(const char *p, const char *end, char *buf, size_t cap) {
-    while (p < end && is_ws(*p)) {
+    while (p < end && json_is_ws(*p)) {
         p++;
     }
     size_t i = 0;
-    while (p < end && i + 1 < cap && *p != ',' && *p != ']' && *p != '}' && !is_ws(*p)) {
+    while (p < end && i + 1 < cap && *p != ',' && *p != ']' && *p != '}' && !json_is_ws(*p)) {
         buf[i++] = *p++;
     }
     buf[i] = '\0';
@@ -67,7 +36,7 @@ static bool parse_int_array(const char *p, const char *end, int32_t *out, int n)
             return false;
         }
         out[i] = (int32_t)strtol(buf, NULL, 10);
-        while (p < end && (is_ws(*p) || *p == ',')) {
+        while (p < end && (json_is_ws(*p) || *p == ',')) {
             p++;  // to the next element
         }
     }
@@ -91,7 +60,7 @@ static bool parse_float_array(const char *p, const char *end, float *out, int n)
             return false;
         }
         out[i] = strtof(buf, NULL);
-        while (p < end && (is_ws(*p) || *p == ',')) {
+        while (p < end && (json_is_ws(*p) || *p == ',')) {
             p++;  // to the next element
         }
     }
@@ -128,22 +97,6 @@ static bool parse_hex32(const char *p, const char *end, uint8_t out[32]) {
     return true;
 }
 
-static bool parse_quoted(const char *p, const char *end, char *out, size_t cap) {
-    while (p < end && *p != '"') {
-        p++;
-    }
-    if (p >= end) {
-        return false;
-    }
-    p++;  // past opening quote
-    size_t i = 0;
-    while (p < end && *p != '"' && i + 1 < cap) {
-        out[i++] = *p++;
-    }
-    out[i] = '\0';
-    return p < end && *p == '"';
-}
-
 bool parse_manifest(const uint8_t *manifest, size_t len, model_contract_t *out, uint8_t sha[32]) {
     const char *j = (const char *)manifest;
     const char *end = j + len;
@@ -151,8 +104,8 @@ bool parse_manifest(const uint8_t *manifest, size_t len, model_contract_t *out, 
 
     // Bound the input{} and output{} regions so the duplicated "shape"/"dtype" keys resolve
     // to the right object. The pipeline always emits input before output.
-    const char *in = mem_find(j, len, "\"input\"");
-    const char *outk = mem_find(j, len, "\"output\"");
+    const char *in = json_mem_find(j, len, "\"input\"");
+    const char *outk = json_mem_find(j, len, "\"output\"");
     if (!in || !outk || outk <= in) {
         return false;
     }
@@ -160,42 +113,42 @@ bool parse_manifest(const uint8_t *manifest, size_t len, model_contract_t *out, 
     size_t out_len = (size_t)(end - outk);
 
     const char *p;
-    char buf[24];
+    char buf[32];
 
     // input.shape / dtype / scale / zero_point  (within the input region)
-    if (!(p = value_after(in, in_len, "\"shape\"")) ||
+    if (!(p = json_value_after(in, in_len, "\"shape\"")) ||
         !parse_int_array(p, in + in_len, out->input_shape, 4)) {
         return false;
     }
-    if (!(p = value_after(in, in_len, "\"dtype\"")) ||
-        !parse_quoted(p, in + in_len, out->input_dtype, sizeof(out->input_dtype))) {
+    if (!(p = json_value_after(in, in_len, "\"dtype\"")) ||
+        !json_parse_quoted(p, in + in_len, out->input_dtype, sizeof(out->input_dtype))) {
         return false;
     }
-    if (!(p = value_after(in, in_len, "\"scale\""))) {
+    if (!(p = json_value_after(in, in_len, "\"scale\""))) {
         return false;
     }
     copy_token(p, in + in_len, buf, sizeof(buf));
     out->input_scale = strtof(buf, NULL);
-    if (!(p = value_after(in, in_len, "\"zero_point\""))) {
+    if (!(p = json_value_after(in, in_len, "\"zero_point\""))) {
         return false;
     }
     copy_token(p, in + in_len, buf, sizeof(buf));
     out->input_zero_point = (int32_t)strtol(buf, NULL, 10);
 
     // output.shape  (within the output region)
-    if (!(p = value_after(outk, out_len, "\"shape\"")) ||
+    if (!(p = json_value_after(outk, out_len, "\"shape\"")) ||
         !parse_int_array(p, end, out->output_shape, 2)) {
         return false;
     }
 
     // arena_bytes + sha256  (top-level)
-    if (!(p = value_after(j, len, "\"arena_bytes\""))) {
+    if (!(p = json_value_after(j, len, "\"arena_bytes\""))) {
         return false;
     }
     copy_token(p, end, buf, sizeof(buf));
     out->arena_bytes = (uint32_t)strtoul(buf, NULL, 10);
 
-    if (!(p = value_after(j, len, "\"sha256\"")) || !parse_hex32(p, end, sha)) {
+    if (!(p = json_value_after(j, len, "\"sha256\"")) || !parse_hex32(p, end, sha)) {
         return false;
     }
     return true;
@@ -213,33 +166,33 @@ bool parse_manifest_scoring(const uint8_t *manifest, size_t len, score_params_t 
     // pick up input.scale or feature_config.scale_eps; output.scale is the first "scale" after it
     // (the pipeline emits output before feature_config / embedding, same fixed order parse_manifest
     // relies on for input-before-output).
-    const char *outk = mem_find(j, len, "\"output\"");
+    const char *outk = json_mem_find(j, len, "\"output\"");
     if (!outk) {
         return false;
     }
     size_t out_len = (size_t)(end - outk);
-    if (!(p = value_after(outk, out_len, "\"scale\""))) {
+    if (!(p = json_value_after(outk, out_len, "\"scale\""))) {
         return false;
     }
     copy_token(p, end, buf, sizeof(buf));
     out->out_scale = strtof(buf, NULL);
-    if (!(p = value_after(outk, out_len, "\"zero_point\""))) {
+    if (!(p = json_value_after(outk, out_len, "\"zero_point\""))) {
         return false;
     }
     copy_token(p, end, buf, sizeof(buf));
     out->out_zero_point = (int32_t)strtol(buf, NULL, 10);
 
     // Centroid + threshold live in the embedding{} object (the per-unit healthy baseline).
-    const char *emb = mem_find(j, len, "\"embedding\"");
+    const char *emb = json_mem_find(j, len, "\"embedding\"");
     if (!emb) {
         return false;
     }
     size_t emb_len = (size_t)(end - emb);
-    if (!(p = value_after(emb, emb_len, "\"centroid\"")) ||
+    if (!(p = json_value_after(emb, emb_len, "\"centroid\"")) ||
         !parse_float_array(p, end, out->centroid, SCORE_EMBED_DIM)) {
         return false;
     }
-    if (!(p = value_after(emb, emb_len, "\"threshold\""))) {
+    if (!(p = json_value_after(emb, emb_len, "\"threshold\""))) {
         return false;
     }
     copy_token(p, end, buf, sizeof(buf));

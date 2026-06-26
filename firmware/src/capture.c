@@ -5,67 +5,20 @@
 #include <string.h>
 
 #include "capture.h"
-
-// Bounded substring search (no NUL assumption on the input).
-static const char *mem_find(const char *hay, size_t hlen, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || nlen > hlen) {
-        return NULL;
-    }
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        if (memcmp(hay + i, needle, nlen) == 0) {
-            return hay + i;
-        }
-    }
-    return NULL;
-}
-
-static int is_ws(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-// Return the value position just after `"key" :` (whitespace skipped), within [hay, hay+hlen).
-static const char *value_after(const char *hay, size_t hlen, const char *quoted_key) {
-    const char *k = mem_find(hay, hlen, quoted_key);
-    if (!k) {
-        return NULL;
-    }
-    const char *p = k + strlen(quoted_key);
-    const char *end = hay + hlen;
-    while (p < end && (is_ws(*p) || *p == ':')) {
-        p++;
-    }
-    return (p < end) ? p : NULL;
-}
-
-static bool parse_quoted(const char *p, const char *end, char *out, size_t cap) {
-    while (p < end && *p != '"') {
-        p++;
-    }
-    if (p >= end) {
-        return false;
-    }
-    p++;  // past opening quote
-    size_t i = 0;
-    while (p < end && *p != '"' && i + 1 < cap) {
-        out[i++] = *p++;
-    }
-    out[i] = '\0';
-    return p < end && *p == '"';
-}
+#include "json_scan.h"
 
 // Extract an optional quoted string field; leave `out` as "" if the key is absent.
 static void parse_quoted_opt(const char *j, size_t len, const char *key, char *out, size_t cap) {
     out[0] = '\0';
-    const char *p = value_after(j, len, key);
+    const char *p = json_value_after(j, len, key);
     if (p) {
-        parse_quoted(p, j + len, out, cap);
+        json_parse_quoted(p, j + len, out, cap);
     }
 }
 
 // True when the value just after a "key" is the literal `true` (within [p, end)).
 static bool value_is_true(const char *p, const char *end) {
-    while (p < end && is_ws(*p)) {
+    while (p < end && json_is_ws(*p)) {
         p++;
     }
     // cppcheck-suppress knownConditionTrueFalse  // FP: cppcheck assumes the ws-skip ran to
@@ -78,7 +31,7 @@ bool capture_parse_cmd(const uint8_t *buf, size_t len, capture_cmd_t *out) {
     memset(out, 0, sizeof(*out));
 
     // A stop command ({"stop":true}) clears the watch-set; it carries no segment.
-    const char *p = value_after(j, len, "\"stop\"");
+    const char *p = json_value_after(j, len, "\"stop\"");
     // cppcheck-suppress knownConditionTrueFalse  // FP propagated from value_is_true (see above).
     if (p && value_is_true(p, j + len)) {
         out->stop = true;

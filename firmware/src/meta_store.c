@@ -33,6 +33,10 @@ void meta_blob_finalize(meta_blob_t *b) {
     b->crc = blob_crc(b);
 }
 
+// `seq` is treated as strictly increasing: a plain `>` picks the newer copy. It is uint32_t and
+// bumped once per metadata write, so it would only wrap after ~4 billion deploys — at which point
+// the wrapped copy would read as older. That is far beyond any device's service life; if a use
+// ever approaches it, switch these comparisons to serial-number arithmetic (signed wrap delta).
 int meta_select_newest(const meta_blob_t *a, const meta_blob_t *b, model_meta_t *out) {
     bool va = meta_blob_valid(a);
     bool vb = meta_blob_valid(b);

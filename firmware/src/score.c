@@ -6,6 +6,11 @@
 #include <math.h>
 
 // Model output quantization (quant.json) and the per-unit healthy baseline (baseline.json).
+// These bake in the values for the build-time / last-good model and back score_default_params()
+// — used by tests and the no-arg score_distance(). At runtime the AUTHORITATIVE scoring set is
+// the one parsed per-deploy from the manifest (parse_manifest_scoring -> score_params_t, carried
+// in slot metadata); the centroid is this unit's healthy baseline, recomputed per board at
+// commissioning. Don't "retune" a board by editing these constants — fix the manifest instead.
 #define SCORE_OUT_SCALE 0.16173580288887024
 #define SCORE_OUT_ZP    (-21)
 
