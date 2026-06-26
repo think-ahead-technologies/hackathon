@@ -67,6 +67,11 @@ static shadow_stats_t g_shadow;
 // Contract E capture watch-set (segments the platform asked us to record). Pure, host-tested.
 static capture_set_t g_capture;
 
+// Last CM55 score sequence we published. CM55 bumps SHARED_SCORE->seq once per inference; we
+// publish (and shadow/capture) only when it advances, so the Contract B cadence tracks the
+// inference window — not how often the loop happens to spin or how chatty the broker is.
+static uint32_t g_last_score_seq;
+
 // ---- Contract C deploy session ---------------------------------------------
 #define DEPLOY_MANIFEST_MAX 1024u
 // VERIFY: reserved per-slot flash size (>= worst-case flatbuffer). MUST equal the slot spacing in
@@ -96,8 +101,9 @@ static void deploy_session_reset(void) {
     deploy_rx_reset(&g_dep.rx);
 }
 
-// Publish one Contract B inference result.
-static void publish_score(int sock, float score) {
+// Publish one Contract B inference result. Returns <0 on a transport error (the caller reconnects),
+// 0 when there was nothing to send (a frame-build failure, never fatal to the connection).
+static int publish_score(int sock, float score) {
     char body[160];
     int blen = snprintf(body, sizeof(body),
                         "{\"ts\":\"\",\"container_id\":\"" CONTAINER "\","
@@ -107,7 +113,8 @@ static void publish_score(int sock, float score) {
     char frame[256];
     int flen = nats_build_pub(frame, sizeof(frame), PUB_SUBJECT,
                               (const uint8_t *)body, (size_t)blen);
-    if (flen > 0) hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
+    if (flen <= 0) return 0;
+    return hal_tcp_send(sock, (const uint8_t *)frame, (size_t)flen);
 }
 
 // Publish one gathered feature window to the capture sink, tagged with the command metadata so
@@ -269,16 +276,11 @@ static void evaluate_shadow(float active_score, float candidate_score) {
     g_shadowing = false;
 }
 
-// Entry point for the device orchestration loop. On a bare-metal host this is the
-// program; under ModusToolbox the board main() (proj_cm33_ns) brings up the BSP and
-// runs this as a FreeRTOS task (see firmware-app/). It only returns on a fatal init
-// failure — the steady state is the infinite publish/deploy loop below.
-int device_main(void) {
-    if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
-    if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
-
-    // Retry the broker connect: right after Wi-Fi associates, DNS / the network may not be
-    // ready for a beat, and a single miss would otherwise strand the device until reset.
+// Establish one NATS session: connect (with retry while Wi-Fi/DNS settle), read INFO, authenticate
+// (nkey if the server sent a nonce, else anonymous), CONNECT, and SUBscribe. Returns the socket on
+// success, or -1 if the session could not be brought up — the caller decides whether to retry. Every
+// failure path closes the socket so a single static handle is never leaked across reconnects.
+static int nats_session_open(void) {
     int sock = -1;
     for (int attempt = 1; attempt <= NATS_CONNECT_RETRIES; attempt++) {
         sock = hal_tcp_connect(NATS_HOST, NATS_PORT);
@@ -287,10 +289,19 @@ int device_main(void) {
                attempt, NATS_CONNECT_RETRIES, NATS_CONNECT_RETRY_MS);
         hal_sleep_ms(NATS_CONNECT_RETRY_MS);
     }
-    if (sock < 0) return 1;
+    if (sock < 0) return -1;
 
+    // INFO is the server's first line and arrives immediately; wait out recv timeouts (0) for it,
+    // but bail on a real error so we don't authenticate against an empty line.
     char line[256];
-    hal_tcp_recv_line(sock, line, sizeof(line));      // INFO (carries a nonce when auth is on)
+    int n;
+    do {
+        n = hal_tcp_recv_line(sock, line, sizeof(line));
+    } while (n == 0);
+    if (n < 0) {
+        hal_tcp_close(sock);
+        return -1;
+    }
 
     // If the server sent a nonce it wants nkey auth: present this device's public nkey and a
     // signature over the nonce. No nonce -> connect anonymously (open demo fabric).
@@ -304,57 +315,115 @@ int device_main(void) {
         if (!hal_nkey_public(nkey, sizeof(nkey)) ||
             !hal_nkey_sign((const uint8_t *)nonce, strlen(nonce), sig) ||
             nats_b64_encode(sigb64, sizeof(sigb64), sig, sizeof(sig)) < 0) {
-            return 1;  // cannot authenticate -> do not join the fabric
+            hal_tcp_close(sock);
+            return -1;  // cannot authenticate -> do not join the fabric
         }
         cn = nats_build_connect(connect, sizeof(connect), CONTAINER, nkey, sigb64);
     } else {
         cn = nats_build_connect(connect, sizeof(connect), CONTAINER, NULL, NULL);
     }
-    if (cn < 0) return 1;
-    hal_tcp_send(sock, (const uint8_t *)connect, (size_t)cn);
+    if (cn < 0 || hal_tcp_send(sock, (const uint8_t *)connect, (size_t)cn) < 0) {
+        hal_tcp_close(sock);
+        return -1;
+    }
 
     // Subscribe to Contract C deploys (sid 1) and Contract E capture commands (sid 2).
     char sub[128];
     int sn = snprintf(sub, sizeof(sub), "SUB %s 1\r\nSUB %s 2\r\n", DEPLOY_SUB, CAPTURE_SUB);
-    hal_tcp_send(sock, (const uint8_t *)sub, (size_t)sn);
+    if (hal_tcp_send(sock, (const uint8_t *)sub, (size_t)sn) < 0) {
+        hal_tcp_close(sock);
+        return -1;
+    }
+    return sock;
+}
 
+// Discard `n` payload bytes from the socket — an unhandled or oversized MSG body — so the stream
+// stays framed and the next recv_line lands on a real protocol line, not payload. Returns false on
+// a transport error (the caller reconnects). recv_exact rides out the socket timeout internally.
+static bool nats_drain(int sock, uint32_t n) {
+    uint8_t scratch[256];
+    while (n > 0) {
+        uint32_t chunk = (n < sizeof(scratch)) ? n : (uint32_t)sizeof(scratch);
+        if (hal_tcp_recv_exact(sock, scratch, chunk) != (int)chunk) {
+            return false;
+        }
+        n -= chunk;
+    }
+    return true;
+}
+
+// Run one connected NATS session until the transport drops. Returns when the connection is lost
+// (recv/send error or peer close) so the caller can reconnect; the socket is still open on return.
+static void nats_session_run(int sock) {
+    char line[256];
     for (;;) {
-        // Drain any pending protocol lines (keepalive + inbound deploys).
+        // Drain one protocol line (keepalive + inbound deploys/commands). 0 = recv timeout (quiet
+        // socket) -> fall through to publishing; <0 = transport gone -> end the session.
         int n = hal_tcp_recv_line(sock, line, sizeof(line));
+        if (n < 0) {
+            printf("[net] connection lost; reconnecting\n");
+            return;
+        }
         if (n > 0) {
             switch (nats_line_kind(line)) {
                 case NATS_LINE_PING:
-                    hal_tcp_send(sock, (const uint8_t *)"PONG\r\n", 6);
+                    if (hal_tcp_send(sock, (const uint8_t *)"PONG\r\n", 6) < 0) return;
                     break;
                 case NATS_LINE_MSG: {
+                    // One NATS message: "MSG <subj> <sid> <#bytes>\r\n", then exactly payload_len
+                    // body bytes (its trailing CRLF reads back as an empty line, ignored). The body
+                    // MUST be consumed in full whatever we do with it — leaving any byte in the
+                    // socket would make the next recv_line read payload as a protocol line.
+                    static uint8_t frame[DEPLOY_HDR_BYTES + 4096];
+                    static uint8_t cmdbuf[512];
                     nats_msg_t msg;
-                    if (!nats_parse_msg_header(line, &msg)) break;
-                    if (strcmp(msg.subject, DEPLOY_SUB) == 0) {
-                        // The MSG payload is one Contract C frame (header + chunk). Read it, then
-                        // parse + route. One NATS message carries at most a header + one chunk.
-                        static uint8_t frame[DEPLOY_HDR_BYTES + 4096];
-                        deploy_hdr_t h;
-                        if (msg.payload_len <= sizeof(frame) &&
-                            hal_tcp_recv_exact(sock, frame, msg.payload_len) == (int)msg.payload_len &&
-                            deploy_parse_header(frame, msg.payload_len, &h)) {
-                            deploy_on_frame(&h, frame + DEPLOY_HDR_BYTES);
-                        }
-                    } else if (strcmp(msg.subject, CAPTURE_SUB) == 0) {
-                        // The payload is one Contract E command (small JSON): add a segment to the
-                        // watch-set, or stop listening (clears it). Commands accumulate over time.
-                        static uint8_t cmdbuf[512];
-                        capture_cmd_t cmd;
-                        if (msg.payload_len <= sizeof(cmdbuf) &&
-                            hal_tcp_recv_exact(sock, cmdbuf, msg.payload_len) == (int)msg.payload_len &&
-                            capture_parse_cmd(cmdbuf, msg.payload_len, &cmd)) {
-                            capture_apply(&g_capture, &cmd);
-                            if (cmd.stop) {
-                                printf("[capture] stop listening\n");
-                            } else {
-                                printf("[capture] watching segment=%s label=%s (%u total)\n",
-                                       cmd.segment, cmd.label, g_capture.count);
+                    if (!nats_parse_msg_header(line, &msg)) {
+                        // No payload_len -> we can't realign the stream. Reconnect rather than
+                        // risk interpreting the body as protocol.
+                        printf("[net] unparseable MSG header; reconnecting\n");
+                        return;
+                    }
+                    switch (nats_route_msg(&msg, DEPLOY_SUB, sizeof(frame),
+                                           CAPTURE_SUB, sizeof(cmdbuf))) {
+                        case NATS_ROUTE_DEPLOY: {
+                            // The MSG payload is one Contract C frame (header + chunk). Read it,
+                            // then parse + route. One NATS message carries header + one chunk.
+                            if (hal_tcp_recv_exact(sock, frame, msg.payload_len) !=
+                                (int)msg.payload_len) {
+                                return;  // body didn't arrive -> connection lost
                             }
+                            deploy_hdr_t h;
+                            if (deploy_parse_header(frame, msg.payload_len, &h)) {
+                                deploy_on_frame(&h, frame + DEPLOY_HDR_BYTES);
+                            }
+                            break;
                         }
+                        case NATS_ROUTE_CAPTURE: {
+                            // One Contract E command (small JSON): add a segment to the watch-set,
+                            // or stop listening (clears it). Commands accumulate over time.
+                            if (hal_tcp_recv_exact(sock, cmdbuf, msg.payload_len) !=
+                                (int)msg.payload_len) {
+                                return;
+                            }
+                            capture_cmd_t cmd;
+                            if (capture_parse_cmd(cmdbuf, msg.payload_len, &cmd)) {
+                                capture_apply(&g_capture, &cmd);
+                                if (cmd.stop) {
+                                    printf("[capture] stop listening\n");
+                                } else {
+                                    printf("[capture] watching segment=%s label=%s (%u total)\n",
+                                           cmd.segment, cmd.label, g_capture.count);
+                                }
+                            }
+                            break;
+                        }
+                        case NATS_ROUTE_DRAIN:
+                            // Unknown subject, or a body too large for our buffers: drain it so the
+                            // stream stays framed instead of desyncing.
+                            printf("[net] draining %u-byte MSG on %s\n",
+                                   (unsigned)msg.payload_len, msg.subject);
+                            if (!nats_drain(sock, msg.payload_len)) return;
+                            break;
                     }
                     break;
                 }
@@ -365,17 +434,22 @@ int device_main(void) {
 
         // Inference runs on CM55 + the Ethos-U55 NPU; the dwell-smoothed anomaly score (and, while
         // shadowing a candidate, the candidate's score on the same window) arrive over the shared
-        // SOCMEM mailbox. model_loader_infer reads them; CM33-NS forwards the active score to NATS.
-        // Until CM55 has produced its first score (magic unset), the score is 0.
+        // SOCMEM mailbox. Publish only on a fresh score (seq advances once per CM55 window) so the
+        // Contract B cadence is the inference rate, not the loop spin rate. Until CM55 has produced
+        // its first score (magic unset), there is nothing to publish.
+        if (SHARED_SCORE->magic != SHARED_SCORE_MAGIC || SHARED_SCORE->seq == g_last_score_seq) {
+            continue;
+        }
+        g_last_score_seq = SHARED_SCORE->seq;
+
         float candidate_score = 0.0f;
         bool  have_candidate = false;
         float score = model_loader_infer(NULL, 0, &candidate_score, &have_candidate);
-        publish_score(sock, score);
+        if (publish_score(sock, score) < 0) return;
 
         // While listening, record this window whenever the device is on a watched segment.
-        // The feature window is computed on CM55 and mirrored into the shared mailbox; publish
-        // that (only meaningful once CM55 is live, i.e. magic is set).
-        if (capture_listening(&g_capture) && SHARED_SCORE->magic == SHARED_SCORE_MAGIC) {
+        // The feature window is computed on CM55 and mirrored into the shared mailbox.
+        if (capture_listening(&g_capture)) {
             char seg[32];
             if (!hal_track_segment(seg, sizeof(seg))) seg[0] = '\0';
             const capture_entry_t *e = capture_match(&g_capture, seg);
@@ -392,5 +466,28 @@ int device_main(void) {
         if (g_shadowing && have_candidate) {
             evaluate_shadow(score, candidate_score);
         }
+    }
+}
+
+// Entry point for the device orchestration loop. On a bare-metal host this is the
+// program; under ModusToolbox the board main() (proj_cm33_ns) brings up the BSP and
+// runs this as a FreeRTOS task (see firmware-app/). It only returns on a fatal init
+// failure — the steady state is the infinite (re)connect / publish / deploy loop below.
+int device_main(void) {
+    if (!hal_net_init()) return 1;                    // bring Wi-Fi up before any socket
+    if (!model_loader_load_active(SLOT_A)) return 1;  // baked-in / last-good model
+
+    // Session loop: a dropped broker connection is a transient, not a fatal — re-establish it
+    // forever rather than stranding the device until a power-cycle.
+    for (;;) {
+        int sock = nats_session_open();
+        if (sock < 0) {
+            printf("[net] session setup failed; retrying in %d ms\n", NATS_CONNECT_RETRY_MS);
+            hal_sleep_ms(NATS_CONNECT_RETRY_MS);
+            continue;
+        }
+        deploy_session_reset();   // a new connection invalidates any half-streamed deploy
+        nats_session_run(sock);
+        hal_tcp_close(sock);
     }
 }

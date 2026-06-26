@@ -131,3 +131,17 @@ bool nats_parse_msg_header(const char *line, nats_msg_t *out) {
     out->payload_len = (uint32_t)len;
     return true;
 }
+
+nats_route_t nats_route_msg(const nats_msg_t *msg,
+                            const char *deploy_sub, uint32_t deploy_cap,
+                            const char *capture_sub, uint32_t capture_cap) {
+    // A subject we serve only routes to its handler if the body also fits that handler's buffer;
+    // an oversized body (or any other subject) falls through to DRAIN so it is still consumed.
+    if (strcmp(msg->subject, deploy_sub) == 0 && msg->payload_len <= deploy_cap) {
+        return NATS_ROUTE_DEPLOY;
+    }
+    if (strcmp(msg->subject, capture_sub) == 0 && msg->payload_len <= capture_cap) {
+        return NATS_ROUTE_CAPTURE;
+    }
+    return NATS_ROUTE_DRAIN;
+}

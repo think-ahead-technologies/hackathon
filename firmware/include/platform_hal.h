@@ -75,6 +75,8 @@ int  hal_tcp_send(int sock, const uint8_t *data, size_t len);
 int  hal_tcp_recv_line(int sock, char *buf, size_t cap);
 // Read exactly `len` payload bytes (the body following a MSG header). Returns len or -1.
 int  hal_tcp_recv_exact(int sock, uint8_t *buf, size_t len);
+// Tear the current connection down (after a transport error, before reconnecting). Idempotent.
+void hal_tcp_close(int sock);
 
 // ---- On-device localization (track segment) --------------------------------
 // Copy the id of the track segment the device is in RIGHT NOW (e.g. "seg-4") into `out`,

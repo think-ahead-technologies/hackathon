@@ -471,6 +471,12 @@ static const char DEVICE_TLS_ROOT_CA[] =
 #define NATS_TLS_SERVER_NAME "nats"
 #endif
 
+// Receive timeout (ms) on the NATS socket. The steady-state loop interleaves blocking line-reads
+// with publishing CM55 scores on a single task, so recv MUST return periodically even on a quiet
+// socket — otherwise the publish path stalls until the next server PING. recv_line/recv_exact treat
+// this timeout as "no data yet" (not an error), so it bounds latency without breaking either read.
+#define NATS_RECV_TIMEOUT_MS 200u
+
 static cy_socket_t g_sock;
 static bool        g_sock_open = false;
 
@@ -484,6 +490,15 @@ int hal_tcp_connect(const char *host, uint16_t port) {
 #endif
     if (cy_socket_create(CY_SOCKET_DOMAIN_AF_INET, CY_SOCKET_TYPE_STREAM,
                          proto, &g_sock) != CY_RSLT_SUCCESS) {
+        return -1;
+    }
+
+    // Bound recv() so the single-task loop can't block past the next score window on a quiet
+    // socket. VERIFY: CY_SOCKET_SO_RCVTIMEO takes a uint32_t milliseconds on the E84 secure-sockets.
+    uint32_t rx_timeout_ms = NATS_RECV_TIMEOUT_MS;
+    if (cy_socket_setsockopt(g_sock, CY_SOCKET_SOL_SOCKET, CY_SOCKET_SO_RCVTIMEO,
+                             &rx_timeout_ms, sizeof(rx_timeout_ms)) != CY_RSLT_SUCCESS) {
+        cy_socket_delete(g_sock);
         return -1;
     }
 
@@ -566,13 +581,27 @@ int hal_tcp_recv_exact(int sock, uint8_t *buf, size_t len) {
     size_t got = 0;
     while (got < len) {
         uint32_t n = 0;
-        if (cy_socket_recv(g_sock, buf + got, len - got, 0, &n) != CY_RSLT_SUCCESS) {
-            return -1;
+        // VERIFY: CY_RSLT_MODULE_SECURE_SOCKETS_TIMEOUT is the rc cy_socket_recv returns when the
+        // SO_RCVTIMEO window elapses with no data. A MSG payload is already committed by its header,
+        // so a timeout mid-body just means "more is coming" — keep waiting rather than abort.
+        cy_rslt_t rc = cy_socket_recv(g_sock, buf + got, len - got, 0, &n);
+        if (rc == CY_RSLT_MODULE_SECURE_SOCKETS_TIMEOUT) {
+            continue;
         }
+        if (rc != CY_RSLT_SUCCESS) return -1;
         if (n == 0) return -1;  // peer closed
         got += n;
     }
     return (int)got;
+}
+
+void hal_tcp_close(int sock) {
+    (void)sock;
+    if (g_sock_open) {
+        cy_socket_disconnect(g_sock, 0);
+        cy_socket_delete(g_sock);
+        g_sock_open = false;
+    }
 }
 
 // On-device track localization. STUB: the figure-8 lap segmentation (wear_detector/localize.py)
@@ -593,8 +622,16 @@ int hal_tcp_recv_line(int sock, char *buf, size_t cap) {
     while (i < cap - 1) {
         uint8_t ch;
         uint32_t n = 0;
-        if (cy_socket_recv(g_sock, &ch, 1, 0, &n) != CY_RSLT_SUCCESS) return -1;
-        if (n == 0) return 0;  // timeout / closed
+        cy_rslt_t rc = cy_socket_recv(g_sock, &ch, 1, 0, &n);
+        if (rc == CY_RSLT_MODULE_SECURE_SOCKETS_TIMEOUT) {
+            // No byte within the recv window. At a line boundary (i == 0) that's just a quiet
+            // socket — return 0 so the caller can publish a score and poll again. Mid-line, keep
+            // waiting: returning here would drop the bytes already consumed and desync the stream.
+            if (i == 0) return 0;
+            continue;
+        }
+        if (rc != CY_RSLT_SUCCESS) return -1;  // genuine transport error -> caller reconnects
+        if (n == 0) return -1;                 // peer closed -> caller reconnects
         if (ch == '\n' && i > 0 && buf[i - 1] == '\r') {
             buf[i - 1] = '\0';     // strip CRLF
             return (int)(i - 1);
